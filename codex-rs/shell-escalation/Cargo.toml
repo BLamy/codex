@@ -11,7 +11,7 @@ path = "src/bin/main_execve_wrapper.rs"
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(unix)'.dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-protocol = { workspace = true }

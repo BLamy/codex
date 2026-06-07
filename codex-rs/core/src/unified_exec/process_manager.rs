@@ -83,6 +83,16 @@ const NETWORK_ACCESS_DENIED_MESSAGE: &str =
 const LATE_NETWORK_DENIAL_GRACE_PERIOD: Duration = Duration::from_millis(100);
 const INTERRUPT: &str = "\u{3}";
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_process_manager_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_process_manager_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 /// Test-only override for deterministic unified exec process IDs.
 ///
 /// In production builds this value should remain at its default (`false`) and
@@ -351,7 +361,7 @@ fn terminate_process_on_network_denial(
 ) {
     let network_cancelled = deferred.cancellation_token();
     let process_exited = process.cancellation_token();
-    tokio::spawn(async move {
+    spawn_process_manager_task(async move {
         let denied = tokio::select! {
             _ = network_cancelled.cancelled() => true,
             _ = process_exited.cancelled() => {
@@ -1048,10 +1058,10 @@ impl UnifiedExecProcessManager {
             )
             .await;
         }
-        if environment.is_remote() {
+        if environment.is_remote() || cfg!(target_arch = "wasm32") {
             if !inherited_fds.is_empty() {
                 return Err(UnifiedExecError::create_process(
-                    "remote exec-server does not support inherited file descriptors".to_string(),
+                    "exec-server backend does not support inherited file descriptors".to_string(),
                 ));
             }
 

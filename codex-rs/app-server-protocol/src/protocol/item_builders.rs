@@ -33,13 +33,27 @@ use codex_protocol::protocol::GuardianAssessmentAction;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::PatchApplyBeginEvent;
 use codex_protocol::protocol::PatchApplyEndEvent;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_shell_command::parse_command::parse_command;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_shell_command::parse_command::shlex_join;
 use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::warn;
+
+#[cfg(target_arch = "wasm32")]
+fn shlex_join(tokens: &[String]) -> String {
+    tokens.join(" ")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_command(command: &[String]) -> Vec<ParsedCommand> {
+    vec![ParsedCommand::Unknown {
+        cmd: shlex_join(command),
+    }]
+}
 
 pub fn build_file_change_approval_request_item(
     payload: &ApplyPatchApprovalRequestEvent,

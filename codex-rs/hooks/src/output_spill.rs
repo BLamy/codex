@@ -4,8 +4,11 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::formatted_truncate_text;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::warn;
+#[cfg(not(target_arch = "wasm32"))]
 use uuid::Uuid;
 
 const HOOK_OUTPUTS_DIR: &str = "hook_outputs";
@@ -18,8 +21,13 @@ pub(crate) struct HookOutputSpiller {
 
 impl HookOutputSpiller {
     pub(crate) fn new() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let output_base = std::path::PathBuf::from("/tmp");
+        #[cfg(not(target_arch = "wasm32"))]
+        let output_base = std::env::temp_dir();
+
         Self {
-            output_dir: AbsolutePathBuf::resolve_path_against_base(std::env::temp_dir(), "/")
+            output_dir: AbsolutePathBuf::resolve_path_against_base(output_base, "/")
                 .join(HOOK_OUTPUTS_DIR),
         }
     }
@@ -35,29 +43,41 @@ impl HookOutputSpiller {
             return text;
         }
 
-        let path = hook_output_path(&self.output_dir, thread_id);
-        if let Some(parent) = path.parent()
-            && let Err(err) = fs::create_dir_all(parent.as_ref()).await
+        #[cfg(target_arch = "wasm32")]
         {
-            warn!(
-                "failed to create hook output directory {}: {err}",
-                parent.display()
-            );
+            let _ = thread_id;
             return formatted_truncate_text(
                 &text,
                 TruncationPolicy::Tokens(HOOK_OUTPUT_TOKEN_LIMIT),
             );
         }
 
-        if let Err(err) = fs::write(path.as_ref(), &text).await {
-            warn!("failed to write hook output {}: {err}", path.display());
-            return formatted_truncate_text(
-                &text,
-                TruncationPolicy::Tokens(HOOK_OUTPUT_TOKEN_LIMIT),
-            );
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = hook_output_path(&self.output_dir, thread_id);
+            if let Some(parent) = path.parent()
+                && let Err(err) = fs::create_dir_all(parent.as_ref()).await
+            {
+                warn!(
+                    "failed to create hook output directory {}: {err}",
+                    parent.display()
+                );
+                return formatted_truncate_text(
+                    &text,
+                    TruncationPolicy::Tokens(HOOK_OUTPUT_TOKEN_LIMIT),
+                );
+            }
 
-        spilled_hook_output_preview(&text, &path)
+            if let Err(err) = fs::write(path.as_ref(), &text).await {
+                warn!("failed to write hook output {}: {err}", path.display());
+                return formatted_truncate_text(
+                    &text,
+                    TruncationPolicy::Tokens(HOOK_OUTPUT_TOKEN_LIMIT),
+                );
+            }
+
+            spilled_hook_output_preview(&text, &path)
+        }
     }
 
     pub(crate) async fn maybe_spill_texts(
@@ -88,12 +108,14 @@ impl HookOutputSpiller {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn hook_output_path(output_dir: &AbsolutePathBuf, thread_id: ThreadId) -> AbsolutePathBuf {
     output_dir
         .join(thread_id.to_string())
         .join(format!("{}.txt", Uuid::new_v4()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Builds the model-visible replacement for a spilled hook output.
 ///
 /// The path footer is budgeted before truncation so adding the recovery path

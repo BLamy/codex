@@ -10,6 +10,7 @@ use super::RemotePluginServiceConfig;
 use super::ensure_chatgpt_auth;
 use super::fetch_installed_plugins_for_scope_with_download_url;
 use super::remote_plugin_canonical_marketplace_name;
+use crate::background_task::spawn_background;
 use crate::store::PLUGINS_CACHE_DIR;
 use crate::store::PluginStore;
 use crate::store::PluginStoreError;
@@ -95,7 +96,7 @@ pub(crate) fn maybe_start_remote_installed_plugin_bundle_sync(
         return;
     }
 
-    tokio::spawn(async move {
+    spawn_background(async move {
         let result =
             sync_remote_installed_plugin_bundles_once(codex_home, &config, Some(&auth)).await;
         match result {

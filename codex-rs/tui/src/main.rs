@@ -1,15 +1,25 @@
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_arg0::Arg0DispatchPaths;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_arg0::arg0_dispatch_or_else;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_config::LoaderOverrides;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_tui::AppExitInfo;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_tui::Cli;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_tui::ExitReason;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_tui::run_main;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_cli::CliConfigOverrides;
 use std::io::Write;
 use supports_color::Stream;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<String> {
     let is_fatal = matches!(&exit_info.exit_reason, ExitReason::Fatal(_));
     let AppExitInfo {
@@ -38,6 +48,7 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
     lines
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser, Debug)]
 struct TopCli {
     #[clap(flatten)]
@@ -47,6 +58,7 @@ struct TopCli {
     inner: Cli,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> anyhow::Result<()> {
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let top_cli = TopCli::parse();
@@ -81,3 +93,6 @@ fn main() -> anyhow::Result<()> {
         Ok(())
     })
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}

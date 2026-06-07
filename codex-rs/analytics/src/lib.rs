@@ -6,8 +6,14 @@ mod events;
 mod facts;
 mod reducer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 pub use accepted_lines::accepted_line_fingerprints_from_unified_diff;
 pub use accepted_lines::fingerprint_hash;

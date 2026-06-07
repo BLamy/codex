@@ -76,7 +76,6 @@ codex-utils-plugins = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-utils-string = { workspace = true }
 codex-utils-stream-parser = { workspace = true }
-codex-windows-sandbox = { package = "codex-windows-sandbox", path = "../windows-sandbox-rs" }
 csv = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
@@ -104,6 +103,24 @@ shlex = { workspace = true }
 similar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+url = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4", "v5"] }
+whoami = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3.4", features = ["wasm_js"] }
+js-sys = "0.3"
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+codex-windows-sandbox = { package = "codex-windows-sandbox", path = "../windows-sandbox-rs" }
 tokio = { workspace = true, features = [
     "io-std",
     "macros",
@@ -111,15 +128,8 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
     "signal",
 ] }
-tokio-util = { workspace = true, features = ["rt"] }
 tokio-tungstenite = { workspace = true }
-toml = { workspace = true }
-toml_edit = { workspace = true }
-tracing = { workspace = true, features = ["log"] }
-url = { workspace = true }
-uuid = { workspace = true, features = ["serde", "v4", "v5"] }
 which = { workspace = true }
-whoami = { workspace = true }
 
 # Build OpenSSL from source for musl builds.
 [target.x86_64-unknown-linux-musl.dependencies]

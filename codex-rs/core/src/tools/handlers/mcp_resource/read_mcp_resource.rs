@@ -1,4 +1,4 @@
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolInvocation;

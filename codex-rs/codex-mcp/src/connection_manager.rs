@@ -11,7 +11,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::McpAuthStatusEntry;
 use crate::codex_apps_cache::CodexAppsToolsCache;
@@ -72,6 +75,9 @@ use rmcp::model::RequestId;
 use rmcp::model::Resource;
 use rmcp::model::ResourceTemplate;
 use serde_json::Value as JsonValue;
+#[cfg(target_arch = "wasm32")]
+use futures::FutureExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -107,6 +113,30 @@ pub fn tool_is_model_visible(tool: &ToolInfo) -> bool {
     visibility
         .iter()
         .any(|target| target.as_str() == Some(MCP_UI_MODEL_VISIBILITY))
+}
+
+async fn emit_startup_complete(
+    tx_event: Sender<Event>,
+    startup_submit_id: String,
+    outcomes: Vec<(String, Result<ManagedClient, StartupOutcomeError>)>,
+) {
+    let mut summary = McpStartupCompleteEvent::default();
+    for (server_name, outcome) in outcomes {
+        match outcome {
+            Ok(_) => summary.ready.push(server_name),
+            Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
+            Err(StartupOutcomeError::Failed { error }) => summary.failed.push(McpStartupFailure {
+                server: server_name,
+                error,
+            }),
+        }
+    }
+    let _ = tx_event
+        .send(Event {
+            id: startup_submit_id,
+            msg: EventMsg::McpStartupComplete(summary),
+        })
+        .await;
 }
 
 /// A thin wrapper around a set of running [`RmcpClient`] instances.
@@ -374,6 +404,34 @@ impl McpConnectionManager {
         self.clients.contains_key(server_name)
     }
 
+    /// Drain all MCP clients from this manager and return a future that stops
+    /// them and terminates their stdio server processes.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_shutdown(&mut self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        self.startup_cancellation_token.cancel();
+        let clients = std::mem::take(&mut self.clients);
+        self.server_metadata.clear();
+        async move {
+            for client in clients.into_values() {
+                client.shutdown().await;
+            }
+        }
+    }
+
+    /// Drain all MCP clients from this manager and return a future that stops
+    /// them and terminates their host-backed browser transports.
+    #[cfg(target_arch = "wasm32")]
+    pub fn begin_shutdown(&mut self) -> impl std::future::Future<Output = ()> + 'static {
+        self.startup_cancellation_token.cancel();
+        let clients = std::mem::take(&mut self.clients);
+        self.server_metadata.clear();
+        async move {
+            for client in clients.into_values() {
+                client.shutdown().await;
+            }
+        }
+    }
+
     /// Stop all MCP clients owned by this manager and terminate stdio server processes.
     pub async fn shutdown(&self) {
         self.startup_cancellation_token.cancel();
@@ -591,7 +649,11 @@ impl McpConnectionManager {
         &self,
         include_server: impl Fn(&str) -> bool,
     ) -> HashMap<String, Vec<Resource>> {
+        #[cfg(not(target_arch = "wasm32"))]
         let mut join_set = JoinSet::new();
+        #[cfg(target_arch = "wasm32")]
+        let mut tasks =
+            Vec::<futures::future::LocalBoxFuture<'static, (String, Result<Vec<Resource>>)>>::new();
 
         let clients_snapshot = &self.clients;
 
@@ -606,7 +668,7 @@ impl McpConnectionManager {
             let timeout = managed_client.tool_timeout;
             let client = managed_client.client.clone();
 
-            join_set.spawn(async move {
+            let task = async move {
                 let mut collected: Vec<Resource> = Vec::new();
                 let mut cursor: Option<String> = None;
 
@@ -634,11 +696,16 @@ impl McpConnectionManager {
                         None => return (server_name, Ok(collected)),
                     }
                 }
-            });
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            join_set.spawn(task);
+            #[cfg(target_arch = "wasm32")]
+            tasks.push(task.boxed_local());
         }
 
         let mut aggregated: HashMap<String, Vec<Resource>> = HashMap::new();
 
+        #[cfg(not(target_arch = "wasm32"))]
         while let Some(join_res) = join_set.join_next().await {
             match join_res {
                 Ok((server_name, Ok(resources))) => {
@@ -652,6 +719,17 @@ impl McpConnectionManager {
                 }
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        for (server_name, result) in futures::future::join_all(tasks).await {
+            match result {
+                Ok(resources) => {
+                    aggregated.insert(server_name, resources);
+                }
+                Err(err) => {
+                    warn!("Failed to list resources for MCP server '{server_name}': {err:#}");
+                }
+            }
+        }
 
         aggregated
     }
@@ -662,7 +740,12 @@ impl McpConnectionManager {
         &self,
         include_server: impl Fn(&str) -> bool,
     ) -> HashMap<String, Vec<ResourceTemplate>> {
+        #[cfg(not(target_arch = "wasm32"))]
         let mut join_set = JoinSet::new();
+        #[cfg(target_arch = "wasm32")]
+        let mut tasks = Vec::<
+            futures::future::LocalBoxFuture<'static, (String, Result<Vec<ResourceTemplate>>)>,
+        >::new();
 
         let clients_snapshot = &self.clients;
 
@@ -677,7 +760,7 @@ impl McpConnectionManager {
             let client = managed_client.client.clone();
             let timeout = managed_client.tool_timeout;
 
-            join_set.spawn(async move {
+            let task = async move {
                 let mut collected: Vec<ResourceTemplate> = Vec::new();
                 let mut cursor: Option<String> = None;
 
@@ -707,11 +790,16 @@ impl McpConnectionManager {
                         None => return (server_name_cloned, Ok(collected)),
                     }
                 }
-            });
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            join_set.spawn(task);
+            #[cfg(target_arch = "wasm32")]
+            tasks.push(task.boxed_local());
         }
 
         let mut aggregated: HashMap<String, Vec<ResourceTemplate>> = HashMap::new();
 
+        #[cfg(not(target_arch = "wasm32"))]
         while let Some(join_res) = join_set.join_next().await {
             match join_res {
                 Ok((server_name, Ok(templates))) => {
@@ -724,6 +812,19 @@ impl McpConnectionManager {
                 }
                 Err(err) => {
                     warn!("Task panic when listing resource templates for MCP server: {err:#}");
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        for (server_name, result) in futures::future::join_all(tasks).await {
+            match result {
+                Ok(templates) => {
+                    aggregated.insert(server_name, templates);
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to list resource templates for MCP server '{server_name}': {err:#}"
+                    );
                 }
             }
         }

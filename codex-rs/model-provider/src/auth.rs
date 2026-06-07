@@ -2,8 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use codex_agent_identity::AgentIdentityKey;
-use codex_agent_identity::authorization_header_for_agent_task;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::AuthProvider;
 use codex_api::SharedAuthProvider;
@@ -16,6 +14,7 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use http::HeaderValue;
 
 use crate::bearer_auth_provider::BearerAuthProvider;
@@ -77,12 +76,18 @@ pub(crate) fn agent_identity_telemetry(auth: &AgentIdentityAuth) -> AgentIdentit
 }
 
 #[derive(Clone, Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 struct AgentIdentityAuthProvider {
     auth: AgentIdentityAuth,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AuthProvider for AgentIdentityAuthProvider {
     fn add_auth_headers(&self, headers: &mut HeaderMap) {
+        use codex_agent_identity::AgentIdentityKey;
+        use codex_agent_identity::AgentTaskAuthorizationTarget;
+        use codex_agent_identity::authorization_header_for_agent_task;
+
         let record = self.auth.record();
         let header_value = authorization_header_for_agent_task(
             AgentIdentityKey {
@@ -240,9 +245,12 @@ fn bearer_auth_for_provider(
 /// Builds request-header auth for a first-party Codex auth snapshot.
 pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
     match auth {
+        #[cfg(not(target_arch = "wasm32"))]
         CodexAuth::AgentIdentity(auth) => {
             Arc::new(AgentIdentityAuthProvider { auth: auth.clone() })
         }
+        #[cfg(target_arch = "wasm32")]
+        CodexAuth::AgentIdentity(_) => unauthenticated_auth_provider(),
         CodexAuth::BedrockApiKey(_) => unreachable!("{BEDROCK_API_KEY_UNSUPPORTED_MESSAGE}"),
         CodexAuth::ApiKey(_)
         | CodexAuth::Chatgpt(_)

@@ -4,6 +4,10 @@ use std::process::Command;
 use std::process::Output;
 use std::process::Stdio;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 pub(super) fn git_remote_revision(
     source: &str,
@@ -174,7 +178,7 @@ fn run_git_command_with_timeout(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("failed to run {context}: {err}"))?;
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {

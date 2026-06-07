@@ -2,7 +2,10 @@
 
 use codex_app_server_protocol::ThreadGoal as AppThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus as AppThreadGoalStatus;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use crate::bottom_pane::GoalStatusIndicator;
 use crate::goal_display::format_goal_elapsed_seconds;
@@ -113,7 +116,7 @@ mod tests {
     use codex_app_server_protocol::ThreadGoal as AppThreadGoal;
     use codex_app_server_protocol::ThreadGoalStatus as AppThreadGoalStatus;
     use std::time::Duration;
-    use std::time::Instant;
+    use crate::time::Instant;
 
     #[test]
     fn active_goal_usage_prefers_token_budget() {

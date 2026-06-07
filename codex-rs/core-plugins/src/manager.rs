@@ -1,6 +1,7 @@
 use super::LoadedPlugin;
 use super::PluginLoadOutcome;
 use crate::app_mcp_routing::apply_app_mcp_routing_policy;
+use crate::background_task::spawn_background;
 use crate::installed_marketplaces::installed_marketplace_roots_from_layer_stack;
 use crate::is_openai_curated_marketplace_name;
 use crate::loader::PluginHookLoadOutcome;
@@ -93,7 +94,10 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use tokio::sync::OnceCell;
 use tokio::sync::Semaphore;
 use tracing::instrument;
@@ -1984,7 +1988,7 @@ impl PluginsManager {
             let manager = Arc::clone(self);
             let auth_manager_for_remote_sync = auth_manager.clone();
             let on_effective_plugins_changed = on_effective_plugins_changed.clone();
-            tokio::spawn(async move {
+            spawn_background(async move {
                 let auth = auth_manager_for_remote_sync.auth().await;
                 manager.maybe_start_remote_plugin_caches_refresh(
                     &config_for_remote_sync,
@@ -2021,7 +2025,7 @@ impl PluginsManager {
 
             let config_for_featured_plugins = config.clone();
             let manager = Arc::clone(self);
-            tokio::spawn(async move {
+            spawn_background(async move {
                 let auth = auth_manager.auth().await;
                 if let Err(err) = manager
                     .featured_plugin_ids_for_config(&config_for_featured_plugins, auth.as_ref())
@@ -2142,7 +2146,7 @@ impl PluginsManager {
         }
 
         let manager = Arc::clone(self);
-        tokio::spawn(async move {
+        spawn_background(async move {
             manager
                 .run_remote_installed_plugins_cache_refresh_loop()
                 .await;

@@ -6,6 +6,7 @@ use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::agent_jobs_spec::create_spawn_agents_on_csv_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_exec_server::LOCAL_FS;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -82,7 +83,8 @@ pub async fn handle(
     let db = required_state_db(&session)?;
     let input_path = cwd.join(args.csv_path);
     let input_path_display = input_path.display().to_string();
-    let csv_content = tokio::fs::read_to_string(&input_path)
+    let csv_content = LOCAL_FS
+        .read_file_text(&input_path, /*sandbox*/ None)
         .await
         .map_err(|err| {
             FunctionCallError::RespondToModel(format!(
@@ -227,7 +229,7 @@ pub async fn handle(
             FunctionCallError::RespondToModel(format!("agent job {job_id} not found"))
         })?;
     let output_path = PathBuf::from(job.output_csv_path.clone());
-    if !tokio::fs::try_exists(&output_path).await.unwrap_or(false) {
+    if !output_path.exists() {
         export_job_csv_snapshot(db.clone(), &job)
             .await
             .map_err(|err| {

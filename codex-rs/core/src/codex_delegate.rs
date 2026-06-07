@@ -67,6 +67,16 @@ struct PendingMcpInvocation {
     metadata: Option<McpToolApprovalMetadata>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_delegate_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_delegate_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 /// Start an interactive sub-Codex thread and return IO channels.
 ///
 /// The returned `events_rx` yields non-approval events emitted by the sub-agent.
@@ -162,7 +172,7 @@ pub(crate) async fn run_codex_thread_interactive(
     // RequestUserInput approval event only carries a call_id and question metadata.
     let pending_mcp_invocations =
         Arc::new(Mutex::new(HashMap::<String, PendingMcpInvocation>::new()));
-    tokio::spawn(async move {
+    spawn_delegate_task(async move {
         forward_events(
             codex_for_events,
             tx_sub,
@@ -176,7 +186,7 @@ pub(crate) async fn run_codex_thread_interactive(
 
     // Forward ops from the caller to the sub-agent.
     let codex_for_ops = Arc::clone(&codex);
-    tokio::spawn(async move {
+    spawn_delegate_task(async move {
         forward_ops(codex_for_ops, rx_ops, cancel_token_ops).await;
     });
 
@@ -237,7 +247,7 @@ pub(crate) async fn run_codex_thread_one_shot(
     let session = Arc::clone(&io.session);
     let session_loop_termination = io.session_loop_termination.clone();
     let io_for_bridge = io;
-    tokio::spawn(async move {
+    spawn_delegate_task(async move {
         while let Ok(event) = io_for_bridge.next_event().await {
             let should_shutdown = matches!(
                 event.msg,

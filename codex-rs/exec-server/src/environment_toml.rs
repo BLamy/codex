@@ -771,33 +771,27 @@ CODEX_LOG = "debug"
         assert_eq!(environments.default.as_deref(), Some("ssh-dev"));
         assert_eq!(environments.include_local, Some(false));
         assert_eq!(environments.environments.len(), 2);
-        assert_eq!(
-            environments.environments[0],
-            EnvironmentToml {
-                id: "devbox".to_string(),
-                url: Some("ws://127.0.0.1:4512".to_string()),
-                connect_timeout_sec: Some(Duration::from_secs(12)),
-                initialize_timeout_sec: Some(Duration::from_secs(34)),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            environments.environments[1],
-            EnvironmentToml {
-                id: "ssh-dev".to_string(),
-                program: Some("ssh".to_string()),
-                args: Some(vec![
-                    "dev".to_string(),
-                    "codex exec-server --listen stdio".to_string(),
-                ]),
-                env: Some(HashMap::from([(
-                    "CODEX_LOG".to_string(),
-                    "debug".to_string(),
-                )])),
-                cwd: Some(PathBuf::from("/tmp")),
-                ..Default::default()
-            }
-        );
+        assert_eq!(environments.environments[0], EnvironmentToml {
+            id: "devbox".to_string(),
+            url: Some("ws://127.0.0.1:4512".to_string()),
+            connect_timeout_sec: Some(Duration::from_secs(12)),
+            initialize_timeout_sec: Some(Duration::from_secs(34)),
+            ..Default::default()
+        });
+        assert_eq!(environments.environments[1], EnvironmentToml {
+            id: "ssh-dev".to_string(),
+            program: Some("ssh".to_string()),
+            args: Some(vec![
+                "dev".to_string(),
+                "codex exec-server --listen stdio".to_string(),
+            ]),
+            env: Some(HashMap::from([(
+                "CODEX_LOG".to_string(),
+                "debug".to_string(),
+            )])),
+            cwd: Some(PathBuf::from("/tmp")),
+            ..Default::default()
+        });
     }
 
     #[test]

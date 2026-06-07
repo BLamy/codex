@@ -208,15 +208,21 @@ pub(super) async fn user_input_or_turn_inner(
         // new_turn_with_sub_id already emits the error event.
         return;
     };
+    crate::wasm_trace::stage("handler/user_input: built turn context");
     if emit_thread_settings_applied {
+        crate::wasm_trace::stage("handler/user_input: emitting thread settings");
         sess.send_event_raw(Event {
             id: sub_id.clone(),
             msg: thread_settings_applied_event(sess).await,
         })
         .await;
+        crate::wasm_trace::stage("handler/user_input: emitted thread settings");
     }
+    crate::wasm_trace::stage("handler/user_input: checking unknown model warning");
     sess.maybe_emit_model_warnings_for_turn(current_context.as_ref())
         .await;
+    crate::wasm_trace::stage("handler/user_input: checked unknown model warning");
+    crate::wasm_trace::stage("handler/user_input: steering input");
     match sess
         .steer_input(
             items.clone(),
@@ -228,24 +234,30 @@ pub(super) async fn user_input_or_turn_inner(
         .await
     {
         Ok(_) => {
+            crate::wasm_trace::stage("handler/user_input: steer accepted active turn");
             current_context.session_telemetry.user_prompt(&items);
         }
         Err(SteerInputError::NoActiveTurn(items)) => {
+            crate::wasm_trace::stage("handler/user_input: no active turn");
             if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
                 current_context
                     .turn_metadata_state
                     .set_responsesapi_client_metadata(responsesapi_client_metadata);
             }
             current_context.session_telemetry.user_prompt(&items);
+            crate::wasm_trace::stage("handler/user_input: refreshing mcp");
             sess.refresh_mcp_servers_if_requested(
                 &current_context,
                 Some(sess.mcp_elicitation_reviewer()),
             )
             .await;
+            crate::wasm_trace::stage("handler/user_input: refreshed mcp");
             let additional_context_input = {
+                crate::wasm_trace::stage("handler/user_input: merging additional context");
                 let mut state = sess.state.lock().await;
                 state.additional_context.merge(additional_context)
             };
+            crate::wasm_trace::stage("handler/user_input: merged additional context");
             let mut task_input = additional_context_input
                 .into_iter()
                 .map(ResponseItem::from)
@@ -257,14 +269,17 @@ pub(super) async fn user_input_or_turn_inner(
                     client_id: client_user_message_id,
                 });
             }
+            crate::wasm_trace::stage("handler/user_input: spawning task");
             sess.spawn_task(
                 Arc::clone(&current_context),
                 task_input,
                 crate::tasks::RegularTask::new(),
             )
             .await;
+            crate::wasm_trace::stage("handler/user_input: spawned task");
         }
         Err(err) => {
+            crate::wasm_trace::stage("handler/user_input: steer error");
             sess.send_event_raw(Event {
                 id: sub_id,
                 msg: EventMsg::Error(err.to_error_event()),
@@ -297,7 +312,7 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
         sess.active_turn_context_and_cancellation_token().await
     {
         let session = Arc::clone(sess);
-        tokio::spawn(async move {
+        let future = async move {
             execute_user_shell_command(
                 session,
                 turn_context,
@@ -306,7 +321,11 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
                 UserShellCommandMode::ActiveTurnAuxiliary,
             )
             .await;
-        });
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(future);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(future);
         return;
     }
 

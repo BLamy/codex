@@ -1194,14 +1194,11 @@ mod tests {
 
         let late_response =
             read_process_until_change(&backend, &process.process_id, /*after_seq*/ Some(1)).await;
-        assert_eq!(
-            late_response.chunks,
-            vec![ProcessOutputChunk {
-                seq: 2,
-                stream: ExecOutputStream::Stdout,
-                chunk: b"late output after retention\n".to_vec().into(),
-            }]
-        );
+        assert_eq!(late_response.chunks, vec![ProcessOutputChunk {
+            seq: 2,
+            stream: ExecOutputStream::Stdout,
+            chunk: b"late output after retention\n".to_vec().into(),
+        }]);
         assert_eq!(late_response.exit_code, Some(0));
         assert!(!late_response.closed);
 

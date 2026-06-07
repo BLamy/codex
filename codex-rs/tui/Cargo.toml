@@ -21,7 +21,11 @@ doctest = false
 [lints]
 workspace = true
 
-[dependencies]
+[features]
+default = []
+real-tui-wasm = []
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
@@ -125,6 +129,77 @@ uuid = { workspace = true }
 codex-windows-sandbox = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive"] }
+codex-ansi-escape = { workspace = true }
+codex-app-server-protocol = { workspace = true }
+codex-install-context = { workspace = true }
+codex-protocol = { workspace = true }
+codex-terminal-detection = { workspace = true }
+codex-utils-approval-presets = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+codex-utils-elapsed = { workspace = true }
+codex-utils-fuzzy-match = { workspace = true }
+codex-utils-home-dir = { workspace = true }
+codex-utils-path = { workspace = true }
+codex-utils-string = { workspace = true }
+color-eyre = { workspace = true }
+crossterm = { workspace = true, features = ["bracketed-paste", "event-stream"] }
+derive_more = { workspace = true, features = ["is_variant"] }
+diffy = { workspace = true }
+dirs = { workspace = true }
+dunce = { workspace = true }
+image = { workspace = true, features = ["jpeg", "png", "gif", "webp"] }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+getrandom = { version = "0.3.4", features = ["wasm_js"] }
+pathdiff = { workspace = true }
+pulldown-cmark = { workspace = true }
+rand = { workspace = true }
+ratatui = { workspace = true, features = [
+    "scrolling-regions",
+    "unstable-backend-writer",
+    "unstable-rendered-line-info",
+    "unstable-widget-ref",
+] }
+ratatui-macros = { workspace = true }
+regex-lite = { workspace = true }
+rmcp = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+schemars = { workspace = true }
+sha2 = { workspace = true }
+shlex = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+supports-color = { workspace = true }
+tempfile = { workspace = true }
+textwrap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt",
+    "sync",
+    "time",
+] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true, features = ["time"] }
+toml = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
+url = { workspace = true }
+urlencoding = { workspace = true }
+web-time = "1"
+uuid = { workspace = true }
+
+[target.'cfg(all(not(target_os = "linux"), not(target_arch = "wasm32")))'.dependencies]
+cpal = "0.15"
+
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
@@ -143,7 +218,7 @@ winsplit = "0.1"
 
 # Clipboard support via `arboard` is not available on Android/Termux.
 # Only include it for non-Android targets so the crate builds on Android.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 arboard = { workspace = true }
 
 

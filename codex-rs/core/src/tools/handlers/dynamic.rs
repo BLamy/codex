@@ -26,7 +26,7 @@ use codex_tools::ToolSpec;
 use codex_tools::default_namespace_description;
 use codex_tools::dynamic_tool_to_responses_api_tool;
 use serde_json::Value;
-use std::time::Instant;
+use crate::time::Instant;
 use tokio::sync::oneshot;
 use tracing::warn;
 

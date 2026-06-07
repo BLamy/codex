@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::config::Config;
 use crate::config::edit::ConfigEdit;

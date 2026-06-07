@@ -27,6 +27,7 @@ use crate::original_image_detail::sanitize_original_image_detail as sanitize_ima
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
+use crate::time::Instant;
 use crate::tools::ToolRouter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
@@ -182,7 +183,7 @@ pub(super) async fn handle_runtime_response(
     exec: &ExecContext,
     response: RuntimeResponse,
     max_output_tokens: Option<usize>,
-    started_at: std::time::Instant,
+    started_at: Instant,
 ) -> Result<FunctionToolOutput, String> {
     let script_status = format_script_status(&response);
 

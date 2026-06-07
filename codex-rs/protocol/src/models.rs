@@ -3,8 +3,10 @@ use std::io;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::data_url_from_bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::load_for_prompt_bytes;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -22,6 +24,7 @@ use crate::permissions::NetworkSandboxPolicy;
 use crate::protocol::SandboxPolicy;
 use crate::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::ImageProcessingError;
 use codex_utils_path_uri::PathUri;
 use schemars::JsonSchema;
@@ -1465,6 +1468,7 @@ const IMAGE_OPEN_TAG: &str = "<image>";
 const IMAGE_CLOSE_TAG: &str = "</image>";
 const LOCAL_IMAGE_OPEN_TAG_PREFIX: &str = "<image name=";
 const LOCAL_IMAGE_OPEN_TAG_SUFFIX: &str = ">";
+#[cfg(not(target_arch = "wasm32"))]
 const LOCAL_IMAGE_CLOSE_TAG: &str = IMAGE_CLOSE_TAG;
 
 pub fn image_open_tag_text() -> String {
@@ -1502,6 +1506,7 @@ pub fn is_image_close_tag_text(text: &str) -> bool {
     text == IMAGE_CLOSE_TAG
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn invalid_image_error_placeholder(
     path: &std::path::Path,
     error: impl std::fmt::Display,
@@ -1515,6 +1520,7 @@ fn invalid_image_error_placeholder(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unsupported_image_error_placeholder(path: &std::path::Path, mime: &str) -> ContentItem {
     ContentItem::InputText {
         text: format!(
@@ -1531,30 +1537,58 @@ pub fn local_image_content_items_with_label_number(
     label_number: Option<usize>,
     detail: ImageDetail,
 ) -> Vec<ContentItem> {
-    let mode = match detail {
-        ImageDetail::Original => PromptImageMode::Original,
-        ImageDetail::Auto | ImageDetail::Low | ImageDetail::High => PromptImageMode::ResizeToFit,
-    };
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (file_bytes, label_number, detail);
+        return vec![local_image_error_placeholder(
+            path,
+            "local image decoding is unavailable in the browser wasm runtime",
+        )];
+    }
 
-    match load_for_prompt_bytes(path, file_bytes, mode) {
-        Ok(image) => local_image_content_items(path, image.into_data_url(), label_number, detail),
-        Err(err) => match &err {
-            ImageProcessingError::Read { .. }
-            | ImageProcessingError::Encode { .. }
-            | ImageProcessingError::InvalidDataUrl { .. }
-            | ImageProcessingError::ImageTooLarge { .. } => {
-                vec![local_image_error_placeholder(path, &err)]
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mode = match detail {
+            ImageDetail::Original => PromptImageMode::Original,
+            ImageDetail::Auto | ImageDetail::Low | ImageDetail::High => {
+                PromptImageMode::ResizeToFit
             }
-            ImageProcessingError::Decode { .. } if err.is_invalid_image() => {
-                vec![invalid_image_error_placeholder(path, &err)]
+        };
+
+        match load_for_prompt_bytes(path, file_bytes, mode) {
+            Ok(image) => {
+                let mut items = Vec::with_capacity(3);
+                if let Some(label_number) = label_number {
+                    items.push(ContentItem::InputText {
+                        text: local_image_open_tag_text_with_path(label_number, path),
+                    });
+                }
+                items.push(ContentItem::InputImage {
+                    image_url: image.into_data_url(),
+                    detail: Some(detail),
+                });
+                if label_number.is_some() {
+                    items.push(ContentItem::InputText {
+                        text: LOCAL_IMAGE_CLOSE_TAG.to_string(),
+                    });
+                }
+                items
             }
-            ImageProcessingError::Decode { .. } => {
-                vec![local_image_error_placeholder(path, &err)]
-            }
-            ImageProcessingError::UnsupportedImageFormat { mime } => {
-                vec![unsupported_image_error_placeholder(path, mime)]
-            }
-        },
+            Err(err) => match &err {
+                ImageProcessingError::Read { .. } | ImageProcessingError::Encode { .. } => {
+                    vec![local_image_error_placeholder(path, &err)]
+                }
+                ImageProcessingError::Decode { .. } if err.is_invalid_image() => {
+                    vec![invalid_image_error_placeholder(path, &err)]
+                }
+                ImageProcessingError::Decode { .. } => {
+                    vec![local_image_error_placeholder(path, &err)]
+                }
+                ImageProcessingError::UnsupportedImageFormat { mime } => {
+                    vec![unsupported_image_error_placeholder(path, mime)]
+                }
+            },
+        }
     }
 }
 

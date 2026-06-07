@@ -16,7 +16,10 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::codex_apps::normalize_codex_apps_callable_name;
 use crate::codex_apps::normalize_codex_apps_callable_namespace;
@@ -440,7 +443,12 @@ impl AsyncManagedClient {
             .is_some_and(CodexAppsToolsCacheContext::has_current_tools)
         {
             let startup_task = client.clone();
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::spawn(async move {
+                let _ = startup_task.await;
+            });
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(async move {
                 let _ = startup_task.await;
             });
         }

@@ -4,7 +4,10 @@ use serde::Serialize;
 use serde::de::Deserializer;
 use serde::de::{self};
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::default_client::build_raw_auth_reqwest_client;
 use crate::pkce::PkceCodes;

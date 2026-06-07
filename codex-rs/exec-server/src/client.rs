@@ -561,12 +561,9 @@ impl ExecServerClient {
         &self,
         process_id: &ProcessId,
     ) -> Result<TerminateResponse, ExecServerError> {
-        self.call(
-            EXEC_TERMINATE_METHOD,
-            &TerminateParams {
-                process_id: process_id.clone(),
-            },
-        )
+        self.call(EXEC_TERMINATE_METHOD, &TerminateParams {
+            process_id: process_id.clone(),
+        })
         .await
     }
 

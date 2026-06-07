@@ -4,11 +4,17 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 use tokio::io;
 use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 use crate::CopyOptions;
 use crate::CreateDirectoryOptions;

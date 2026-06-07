@@ -1,41 +1,67 @@
+#[cfg(not(target_arch = "wasm32"))]
 mod client;
 mod client_api;
+#[cfg(not(target_arch = "wasm32"))]
 mod client_transport;
+#[cfg(target_arch = "wasm32")]
+mod client_wasm;
+#[cfg(not(target_arch = "wasm32"))]
 mod connection;
 mod environment;
 mod environment_provider;
 mod environment_registry;
+#[cfg(not(target_arch = "wasm32"))]
 mod environment_toml;
+#[cfg(not(target_arch = "wasm32"))]
 mod file_read;
 mod fs_helper;
+#[cfg(not(target_arch = "wasm32"))]
 mod fs_helper_main;
+#[cfg(not(target_arch = "wasm32"))]
 mod fs_sandbox;
+#[cfg(not(target_arch = "wasm32"))]
 mod local_file_system;
+#[cfg(not(target_arch = "wasm32"))]
 mod local_process;
 mod noise_channel;
 mod noise_relay;
 mod process;
+#[cfg(not(target_arch = "wasm32"))]
 mod process_sandbox;
+#[cfg(not(target_arch = "wasm32"))]
 mod regular_file;
+#[cfg(not(target_arch = "wasm32"))]
 mod relay;
+#[cfg(not(target_arch = "wasm32"))]
 mod relay_proto;
+#[cfg(not(target_arch = "wasm32"))]
 mod remote;
+#[cfg(not(target_arch = "wasm32"))]
 mod remote_file_system;
+#[cfg(not(target_arch = "wasm32"))]
 mod remote_process;
 mod resolved_capability;
 mod rpc;
 mod runtime_paths;
+#[cfg(not(target_arch = "wasm32"))]
 mod sandboxed_file_system;
+#[cfg(not(target_arch = "wasm32"))]
 mod server;
 mod telemetry;
 mod trace_context;
+#[cfg(target_arch = "wasm32")]
+mod wasm_host;
 mod websocket_pong_watchdog;
 
 use codex_exec_server_protocol as protocol;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::ExecServerClient;
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::ExecServerError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::http_client::HttpResponseBodyStream;
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::http_client::ReqwestHttpClient;
 pub use client_api::ExecServerClientConnectOptions;
 pub use client_api::HttpClient;
@@ -43,6 +69,12 @@ pub use client_api::NoiseRendezvousConnectArgs;
 pub use client_api::NoiseRendezvousConnectBundle;
 pub use client_api::NoiseRendezvousConnectProvider;
 pub use client_api::RemoteExecServerConnectArgs;
+#[cfg(target_arch = "wasm32")]
+pub use client_wasm::ExecServerClient;
+#[cfg(target_arch = "wasm32")]
+pub use client_wasm::ExecServerError;
+#[cfg(target_arch = "wasm32")]
+pub use client_wasm::HttpResponseBodyStream;
 pub use codex_exec_server_protocol::ProcessId;
 pub use codex_file_system::CopyOptions;
 pub use codex_file_system::CreateDirectoryOptions;
@@ -79,8 +111,11 @@ pub use environment_registry::EnvironmentRegistryHarnessKeyValidationResponse;
 pub use environment_registry::EnvironmentRegistryRegistrationRequest;
 pub use environment_registry::EnvironmentRegistryRegistrationResponse;
 pub use fs_helper::CODEX_FS_HELPER_ARG1;
+#[cfg(not(target_arch = "wasm32"))]
 pub use fs_helper_main::main as run_fs_helper_main;
+#[cfg(not(target_arch = "wasm32"))]
 pub use local_file_system::LOCAL_FS;
+#[cfg(not(target_arch = "wasm32"))]
 pub use local_file_system::LocalFileSystem;
 pub use noise_channel::NoiseChannelError;
 pub use noise_channel::NoiseChannelIdentity;
@@ -145,12 +180,27 @@ pub use protocol::TerminateResponse;
 pub use protocol::WriteParams;
 pub use protocol::WriteResponse;
 pub use protocol::WriteStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::RemoteEnvironmentConfig;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::run_remote_environment;
 pub use resolved_capability::ResolvedSelectedCapabilityRoot;
 pub use runtime_paths::ExecServerRuntimePaths;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::DEFAULT_LISTEN_URL;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::ExecServerListenUrlParseError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::run_main;
 pub use server::run_main_with_telemetry;
 pub use telemetry::ExecServerTelemetry;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_host::LOCAL_FS;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_host::WasmHostFileSystem as LocalFileSystem;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_host::WasmHostHttpClient as ReqwestHttpClient;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_host::WasmHostProcess as LocalProcess;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_host::handle_wasm_host_process_event;

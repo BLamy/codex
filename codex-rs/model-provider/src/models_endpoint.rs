@@ -18,6 +18,7 @@ use codex_login::default_client::build_reqwest_client;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
@@ -83,7 +84,7 @@ impl OpenAiModelsEndpoint {
             None
         };
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+            auth_mode: auth_mode.map(telemetry_auth_mode_label),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,
             agent_identity_telemetry,
@@ -124,6 +125,19 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         client_version: &'a str,
     ) -> ModelsEndpointFuture<'a, CoreResult<(Vec<ModelInfo>, Option<String>)>> {
         Box::pin(OpenAiModelsEndpoint::list_models(self, client_version))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn telemetry_auth_mode_label(mode: impl Into<TelemetryAuthMode>) -> String {
+    mode.into().to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn telemetry_auth_mode_label(mode: impl ToString) -> String {
+    match mode.to_string().as_str() {
+        "ApiKey" | "api_key" | "api-key" | "apikey" => "ApiKey".to_string(),
+        _ => "Chatgpt".to_string(),
     }
 }
 

@@ -247,7 +247,10 @@ fn read_curated_plugins_sha_reads_trimmed_sha_file() {
 #[test]
 fn remove_stale_curated_repo_temp_dirs_removes_only_matching_directories() {
     use std::os::unix::ffi::OsStrExt;
-    use std::time::SystemTime;
+    #[cfg(not(target_arch = "wasm32"))]
+use std::time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
 
     fn set_dir_mtime(path: &Path, age: Duration) -> Result<(), Box<dyn std::error::Error>> {
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;

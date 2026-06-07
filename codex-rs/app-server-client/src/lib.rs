@@ -16,6 +16,11 @@
 //! surfaces as channel-full errors rather than unbounded memory growth.
 
 mod path;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod remote;
+#[cfg(target_arch = "wasm32")]
+#[path = "remote_wasm.rs"]
 mod remote;
 
 use std::error::Error;

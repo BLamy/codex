@@ -1,13 +1,13 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use axum::http::HeaderValue;
 use codex_analytics::AppServerRpcTransport;
 use codex_login::default_client::SetOriginatorError;
 use codex_login::default_client::USER_AGENT_SUFFIX;
 use codex_login::default_client::get_codex_user_agent;
 use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::default_client::set_default_originator;
+use http::HeaderValue;
 
 use super::*;
 use crate::message_processor::ConnectionSessionState;

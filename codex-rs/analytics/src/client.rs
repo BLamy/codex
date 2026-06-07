@@ -28,6 +28,7 @@ use crate::facts::TurnCodexErrorFact;
 use crate::facts::TurnProfileFact;
 use crate::facts::TurnResolvedConfigFact;
 use crate::facts::TurnTokenUsageFact;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::reducer::AnalyticsReducer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ClientResponsePayload;
@@ -38,7 +39,9 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerResponse;
 use codex_login::AuthManager;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_login::CodexAuth;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_login::default_client::create_client;
 use codex_plugin::PluginId;
 use codex_plugin::PluginTelemetryMetadata;
@@ -47,10 +50,12 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 const ANALYTICS_EVENTS_QUEUE_SIZE: usize = 256;
+#[cfg(not(target_arch = "wasm32"))]
 const ANALYTICS_EVENTS_TIMEOUT: Duration = Duration::from_secs(10);
 const ANALYTICS_EVENT_DEDUPE_MAX_KEYS: usize = 4096;
 
@@ -122,6 +127,7 @@ fn analytics_capture_file_from_env() -> Option<PathBuf> {
 }
 
 impl AnalyticsEventsQueue {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(auth_manager: Arc<AuthManager>, destination: AnalyticsEventsDestination) -> Self {
         let (sender, mut receiver) = mpsc::channel(ANALYTICS_EVENTS_QUEUE_SIZE);
         tokio::spawn(async move {
@@ -132,6 +138,16 @@ impl AnalyticsEventsQueue {
                 send_track_events(&auth_manager, &destination, events).await;
             }
         });
+        Self {
+            sender,
+            app_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
+            plugin_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn new(_auth_manager: Arc<AuthManager>, _destination: AnalyticsEventsDestination) -> Self {
+        let (sender, _receiver) = mpsc::channel(ANALYTICS_EVENTS_QUEUE_SIZE);
         Self {
             sender,
             app_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
@@ -195,10 +211,18 @@ impl AnalyticsEventsClient {
         analytics_enabled: Option<bool>,
     ) -> Self {
         let destination = AnalyticsEventsDestination::from_base_url(base_url);
-        Self {
-            queue: (analytics_enabled != Some(false))
-                .then(|| AnalyticsEventsQueue::new(Arc::clone(&auth_manager), destination)),
-        }
+
+        #[cfg(target_arch = "wasm32")]
+        let queue = {
+            let _ = (auth_manager, destination, analytics_enabled);
+            None
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let queue = (analytics_enabled != Some(false))
+            .then(|| AnalyticsEventsQueue::new(Arc::clone(&auth_manager), destination));
+
+        Self { queue }
     }
 
     pub fn disabled() -> Self {
@@ -545,6 +569,7 @@ impl AnalyticsEventsClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn send_track_events(
     auth_manager: &AuthManager,
     destination: &AnalyticsEventsDestination,
@@ -566,6 +591,7 @@ async fn send_track_events(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn track_event_request_batches(events: Vec<TrackEventRequest>) -> Vec<Vec<TrackEventRequest>> {
     let mut batches = Vec::new();
     let mut current_batch = Vec::new();
@@ -589,6 +615,7 @@ fn track_event_request_batches(events: Vec<TrackEventRequest>) -> Vec<Vec<TrackE
     batches
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn send_track_events_request(
     auth: &CodexAuth,
     destination: &AnalyticsEventsDestination,

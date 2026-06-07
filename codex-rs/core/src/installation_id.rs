@@ -11,14 +11,20 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 
 use codex_utils_absolute_path::AbsolutePathBuf;
-use tokio::fs;
 use uuid::Uuid;
 
 pub(crate) const INSTALLATION_ID_FILENAME: &str = "installation_id";
 
 pub async fn resolve_installation_id(codex_home: &AbsolutePathBuf) -> Result<String> {
     let path = codex_home.join(INSTALLATION_ID_FILENAME);
-    fs::create_dir_all(codex_home).await?;
+    std::fs::create_dir_all(codex_home)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = path;
+        return Ok(Uuid::new_v4().to_string());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::task::spawn_blocking(move || {
         let mut options = OpenOptions::new();
         options.read(true).write(true).create(true);

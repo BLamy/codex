@@ -1,10 +1,19 @@
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Stdio;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
 
 use super::CommandShell;
@@ -27,20 +36,55 @@ pub(crate) async fn run_command(
     input_json: &str,
     cwd: &Path,
 ) -> CommandRunResult {
-    let started_at = chrono::Utc::now().timestamp();
-    let started = Instant::now();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (shell, handler, input_json, cwd);
+        let now = chrono::Utc::now().timestamp();
+        return CommandRunResult {
+            started_at: now,
+            completed_at: now,
+            duration_ms: 0,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            error: Some(
+                "browser hook execution requires an almostnode host process shim".to_string(),
+            ),
+        };
+    }
 
-    let mut command = build_command(shell, handler);
-    command
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let started_at = chrono::Utc::now().timestamp();
+        let started = Instant::now();
 
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(err) => {
+        let mut command = build_command(shell, handler);
+        command
+            .current_dir(cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                return CommandRunResult {
+                    started_at,
+                    completed_at: chrono::Utc::now().timestamp(),
+                    duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+
+        if let Some(mut stdin) = child.stdin.take()
+            && let Err(err) = stdin.write_all(input_json.as_bytes()).await
+        {
+            let _ = child.kill().await;
             return CommandRunResult {
                 started_at,
                 completed_at: chrono::Utc::now().timestamp(),
@@ -48,58 +92,44 @@ pub(crate) async fn run_command(
                 exit_code: None,
                 stdout: String::new(),
                 stderr: String::new(),
-                error: Some(err.to_string()),
+                error: Some(format!("failed to write hook stdin: {err}")),
             };
         }
-    };
 
-    if let Some(mut stdin) = child.stdin.take()
-        && let Err(err) = stdin.write_all(input_json.as_bytes()).await
-    {
-        let _ = child.kill().await;
-        return CommandRunResult {
-            started_at,
-            completed_at: chrono::Utc::now().timestamp(),
-            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some(format!("failed to write hook stdin: {err}")),
-        };
-    }
-
-    let timeout_duration = Duration::from_secs(handler.timeout_sec);
-    match timeout(timeout_duration, child.wait_with_output()).await {
-        Ok(Ok(output)) => CommandRunResult {
-            started_at,
-            completed_at: chrono::Utc::now().timestamp(),
-            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
-            exit_code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            error: None,
-        },
-        Ok(Err(err)) => CommandRunResult {
-            started_at,
-            completed_at: chrono::Utc::now().timestamp(),
-            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some(err.to_string()),
-        },
-        Err(_) => CommandRunResult {
-            started_at,
-            completed_at: chrono::Utc::now().timestamp(),
-            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some(format!("hook timed out after {}s", handler.timeout_sec)),
-        },
+        let timeout_duration = Duration::from_secs(handler.timeout_sec);
+        match timeout(timeout_duration, child.wait_with_output()).await {
+            Ok(Ok(output)) => CommandRunResult {
+                started_at,
+                completed_at: chrono::Utc::now().timestamp(),
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
+                exit_code: output.status.code(),
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                error: None,
+            },
+            Ok(Err(err)) => CommandRunResult {
+                started_at,
+                completed_at: chrono::Utc::now().timestamp(),
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                error: Some(err.to_string()),
+            },
+            Err(_) => CommandRunResult {
+                started_at,
+                completed_at: chrono::Utc::now().timestamp(),
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                error: Some(format!("hook timed out after {}s", handler.timeout_sec)),
+            },
+        }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_command(shell: &CommandShell, handler: &ConfiguredHandler) -> Command {
     let mut command = if shell.program.is_empty() {
         default_shell_command()
@@ -116,6 +146,7 @@ fn build_command(shell: &CommandShell, handler: &ConfiguredHandler) -> Command {
     command
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn default_shell_command() -> Command {
     #[cfg(windows)]
     {

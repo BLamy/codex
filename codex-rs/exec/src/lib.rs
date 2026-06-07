@@ -515,15 +515,19 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     codex_core::otel_init::record_process_start(otel.as_ref(), "codex_exec");
     codex_core::otel_init::install_sqlite_telemetry(otel.as_ref(), "codex_exec");
 
+    #[cfg(not(target_arch = "wasm32"))]
     let otel_logger_layer = otel.as_ref().and_then(|o| o.logger_layer());
-
+    #[cfg(not(target_arch = "wasm32"))]
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
 
+    #[cfg(not(target_arch = "wasm32"))]
     let _ = tracing_subscriber::registry()
         .with(fmt_layer)
         .with(otel_tracing_layer)
         .with(otel_logger_layer)
         .try_init();
+    #[cfg(target_arch = "wasm32")]
+    let _ = tracing_subscriber::registry().with(fmt_layer).try_init();
 
     let exec_span = exec_root_span();
     if let Some(context) = traceparent_context_from_env() {
@@ -867,12 +871,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     info!("Codex initialized with event: {session_configured:?}");
 
     let (interrupt_tx, mut interrupt_rx) = mpsc::unbounded_channel::<()>();
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             tracing::debug!("Keyboard interrupt");
             let _ = interrupt_tx.send(());
         }
     });
+    #[cfg(target_arch = "wasm32")]
+    drop(interrupt_tx);
 
     let task_id = match initial_operation {
         InitialOperation::UserTurn {
@@ -1427,7 +1434,11 @@ async fn latest_thread_cwd(thread: &AppServerThread) -> PathBuf {
 }
 
 async fn parse_latest_turn_context_cwd(path: &Path) -> Option<PathBuf> {
+    #[cfg(not(target_arch = "wasm32"))]
     let text = tokio::fs::read_to_string(path).await.ok()?;
+    #[cfg(target_arch = "wasm32")]
+    let text = std::fs::read_to_string(path).ok()?;
+
     for line in text.lines().rev() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -1501,16 +1512,21 @@ async fn resolve_resume_thread_id(
         return Ok(Some(session_id.to_string()));
     }
     if let Some(state_db) = state_db {
-        let cwd = (!args.all).then_some(config.cwd.as_path());
+        #[cfg(not(target_arch = "wasm32"))]
         let resolved = state_db
             .find_thread_by_exact_title(
                 session_id,
                 &[],
                 /*model_providers*/ None,
                 /*archived_only*/ false,
-                cwd,
+                (!args.all).then_some(config.cwd.as_path()),
             )
             .await?;
+        #[cfg(target_arch = "wasm32")]
+        let resolved = state_db
+            .find_thread_by_exact_title(session_id)
+            .await?
+            .filter(|thread| args.all || cwds_match(config.cwd.as_path(), &thread.cwd));
         if let Some(thread) = resolved {
             return Ok(Some(thread.id.to_string()));
         }

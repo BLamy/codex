@@ -4,7 +4,6 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
 use codex_utils_template::Template;
 use std::sync::LazyLock;
-use tokio::fs;
 
 static MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
     parse_embedded_template(
@@ -29,7 +28,7 @@ pub(crate) async fn build_memory_tool_developer_instructions(
 ) -> Option<String> {
     let base_path = codex_home.join("memories");
     let memory_summary_path = base_path.join("memory_summary.md");
-    let memory_summary = fs::read_to_string(&memory_summary_path)
+    let memory_summary = crate::fs::read_to_string(&memory_summary_path)
         .await
         .ok()?
         .trim()

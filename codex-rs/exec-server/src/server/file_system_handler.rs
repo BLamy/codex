@@ -297,12 +297,9 @@ mod tests {
 
         for (file_name, sandbox_policy) in [
             ("danger.txt", SandboxPolicy::DangerFullAccess),
-            (
-                "external.txt",
-                SandboxPolicy::ExternalSandbox {
-                    network_access: NetworkAccess::Restricted,
-                },
-            ),
+            ("external.txt", SandboxPolicy::ExternalSandbox {
+                network_access: NetworkAccess::Restricted,
+            }),
         ] {
             let path =
                 PathUri::from_host_native_path(temp_dir.path().join(file_name)).expect("path URI");

@@ -14,6 +14,8 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 codex-apply-patch = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-install-context = { workspace = true }

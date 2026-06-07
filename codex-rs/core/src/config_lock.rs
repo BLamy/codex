@@ -19,7 +19,7 @@ pub(crate) struct ConfigLockReplayOptions {
 pub(crate) async fn read_config_lock_from_path(
     path: &AbsolutePathBuf,
 ) -> io::Result<ConfigLockfileToml> {
-    let contents = tokio::fs::read_to_string(path).await.map_err(|err| {
+    let contents = std::fs::read_to_string(path).map_err(|err| {
         config_lock_error(format!(
             "failed to read config lock file {}: {err}",
             path.display()

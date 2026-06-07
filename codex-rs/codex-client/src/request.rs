@@ -5,6 +5,12 @@ use reqwest::header::HeaderValue;
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 /// A JSON request body serialized once into reference-counted bytes.
 ///
@@ -236,6 +242,44 @@ impl Request {
             body: Some(bytes),
         })
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn compress_zstd_body(json: Vec<u8>) -> Result<(Vec<u8>, HeaderValue), String> {
+    Ok((
+        zstd::stream::encode_all(std::io::Cursor::new(json), 3).map_err(|err| err.to_string())?,
+        HeaderValue::from_static("zstd"),
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = globalThis, js_name = __almostnodeCodexZstdCompress, catch)]
+    fn almostnode_codex_zstd_compress(
+        input: &js_sys::Uint8Array,
+        level: i32,
+    ) -> Result<js_sys::Uint8Array, JsValue>;
+}
+
+#[cfg(target_arch = "wasm32")]
+fn compress_zstd_body(json: Vec<u8>) -> Result<(Vec<u8>, HeaderValue), String> {
+    let input = js_sys::Uint8Array::from(json.as_slice());
+    let compressed =
+        almostnode_codex_zstd_compress(&input, 3).map_err(js_value_error_message)?;
+    Ok((compressed.to_vec(), HeaderValue::from_static("zstd")))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_value_error_message(error: JsValue) -> String {
+    if let Some(message) = error.as_string() {
+        return message;
+    }
+
+    js_sys::Reflect::get(&error, &JsValue::from_str("message"))
+        .ok()
+        .and_then(|message| message.as_string())
+        .unwrap_or_else(|| "browser zstd request compression failed".to_string())
 }
 
 #[cfg(test)]

@@ -3,6 +3,20 @@
 //! This module owns the normalization that turns ChatGPT-hosted app
 //! connector/tool metadata into model-visible MCP callable names.
 
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
+use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use crate::runtime::emit_duration;
+use crate::tools::MCP_TOOLS_CACHE_WRITE_DURATION_METRIC;
+use crate::tools::ToolInfo;
+use anyhow::Context;
+use codex_login::CodexAuth;
+use codex_protocol::mcp::McpServerInfo;
+use codex_utils_plugins::mcp_connector::is_connector_id_allowed;
 use codex_utils_plugins::mcp_connector::sanitize_name;
 
 pub(crate) fn normalize_codex_apps_tool_title(connector_name: Option<&str>, value: &str) -> String {

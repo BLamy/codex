@@ -31,7 +31,10 @@ impl ConversationHistory {
 }
 
 /// Future returned when an extension tool emits a visible turn-item lifecycle event.
+#[cfg(not(target_arch = "wasm32"))]
 pub type TurnItemEmissionFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+pub type TurnItemEmissionFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 
 /// Visible turn items that an extension may publish into the host lifecycle.
 #[derive(Clone, Debug, PartialEq)]

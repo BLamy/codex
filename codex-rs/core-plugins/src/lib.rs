@@ -1,4 +1,5 @@
 mod app_mcp_routing;
+mod background_task;
 mod discoverable;
 pub mod installed_marketplaces;
 pub mod loader;
@@ -13,8 +14,16 @@ mod npm_source;
 mod plugin_bundle_archive;
 mod provider;
 pub mod remote;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod remote_bundle;
+#[cfg(target_arch = "wasm32")]
+#[path = "remote_bundle_wasm.rs"]
 pub mod remote_bundle;
 pub mod remote_legacy;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod startup_sync;
+#[cfg(target_arch = "wasm32")]
+#[path = "startup_sync_wasm.rs"]
 pub mod startup_sync;
 pub mod store;
 #[cfg(test)]

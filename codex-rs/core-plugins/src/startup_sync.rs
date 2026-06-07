@@ -5,6 +5,10 @@ use std::process::Command;
 use std::process::Output;
 use std::process::Stdio;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use codex_otel::CURATED_PLUGINS_STARTUP_SYNC_FINAL_METRIC;
 use codex_otel::CURATED_PLUGINS_STARTUP_SYNC_METRIC;
@@ -668,7 +672,7 @@ fn run_git_command_with_timeout(
         .spawn()
         .map_err(|err| format!("failed to run {context}: {err}"))?;
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {

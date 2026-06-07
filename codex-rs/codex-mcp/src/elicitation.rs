@@ -27,8 +27,12 @@ use codex_protocol::protocol::EventMsg;
 use codex_rmcp_client::Elicitation;
 use codex_rmcp_client::ElicitationResponse;
 use codex_rmcp_client::SendElicitation;
-use futures::future::BoxFuture;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::future::BoxFuture as MaybeSendBoxFuture;
 use futures::future::FutureExt;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as MaybeSendBoxFuture;
+use rmcp::model::CreateElicitationRequestParams;
 use rmcp::model::ElicitationAction;
 use rmcp::model::RequestId;
 use tokio::sync::Mutex;
@@ -43,11 +47,20 @@ pub struct ElicitationReviewRequest {
     pub elicitation: Elicitation,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub trait ElicitationReviewer: Send + Sync {
     fn review(
         &self,
         request: ElicitationReviewRequest,
-    ) -> BoxFuture<'static, Result<Option<ElicitationResponse>>>;
+    ) -> MaybeSendBoxFuture<'static, Result<Option<ElicitationResponse>>>;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub trait ElicitationReviewer {
+    fn review(
+        &self,
+        request: ElicitationReviewRequest,
+    ) -> MaybeSendBoxFuture<'static, Result<Option<ElicitationResponse>>>;
 }
 
 pub type ElicitationReviewerHandle = Arc<dyn ElicitationReviewer>;
@@ -267,10 +280,30 @@ impl ElicitationRequestManager {
                 rx.await
                     .context("elicitation request channel closed unexpectedly")
             }
-            .boxed()
+            .maybe_send_boxed()
         })
     }
 }
+
+trait MaybeSendFutureExt: futures::Future + Sized {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn maybe_send_boxed(self) -> MaybeSendBoxFuture<'static, Self::Output>
+    where
+        Self: Send + 'static,
+    {
+        self.boxed()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn maybe_send_boxed(self) -> MaybeSendBoxFuture<'static, Self::Output>
+    where
+        Self: 'static,
+    {
+        self.boxed_local()
+    }
+}
+
+impl<F> MaybeSendFutureExt for F where F: futures::Future + Sized {}
 
 pub(crate) fn elicitation_is_rejected_by_policy(approval_policy: AskForApproval) -> bool {
     match approval_policy {

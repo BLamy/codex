@@ -1070,6 +1070,7 @@ impl Session {
                 tool_approvals: Mutex::new(ApprovalStore::default()),
                 guardian_rejections: Mutex::new(HashMap::new()),
                 guardian_rejection_circuit_breaker: Mutex::new(Default::default()),
+                #[cfg(not(target_arch = "wasm32"))]
                 runtime_handle: tokio::runtime::Handle::current(),
                 skills_service,
                 agents_md_manager,

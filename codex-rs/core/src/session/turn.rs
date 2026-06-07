@@ -112,7 +112,10 @@ use codex_utils_stream_parser::AssistantTextStreamParser;
 use codex_utils_stream_parser::ProposedPlanSegment;
 use codex_utils_stream_parser::extract_proposed_plan_text;
 use codex_utils_stream_parser::strip_citations;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use futures::prelude::*;
 use futures::stream::FuturesOrdered;
 use tokio_util::sync::CancellationToken;
@@ -147,12 +150,15 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
+    crate::wasm_trace::stage("turn/run: begin");
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
+    crate::wasm_trace::stage("turn/run: client session ready");
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
+    crate::wasm_trace::stage("turn/run: pre-sampling compact");
     if let Err(err) = run_pre_sampling_compact(&sess, &turn_context, &mut client_session).await {
         if matches!(err, CodexErr::TurnAborted) {
             return Err(err);
@@ -163,15 +169,19 @@ pub(crate) async fn run_turn(
         error!("Failed to run pre-sampling compact");
         return Ok(None);
     }
+    crate::wasm_trace::stage("turn/run: pre-sampling compact done");
 
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+    crate::wasm_trace::stage("turn/run: captured step context");
     // Keep the exact model-visible state used by this turn and its inline compactions.
     let (mut world_state, display_roots) = tokio::join!(
         sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref()),
         turn_diff_display_roots(turn_context.as_ref()),
     );
+    crate::wasm_trace::stage("turn/run: recorded context updates");
 
+    crate::wasm_trace::stage("turn/run: building skills and plugins");
     let Some((injection_items, explicitly_enabled_connectors)) = build_skills_and_plugins(
         &sess,
         first_step_context.as_ref(),
@@ -182,29 +192,41 @@ pub(crate) async fn run_turn(
     else {
         return Ok(None);
     };
+    crate::wasm_trace::stage("turn/run: built skills and plugins");
 
+    crate::wasm_trace::stage("turn/run: running session start hooks");
     if run_pending_session_start_hooks(&sess, &turn_context).await {
         return Ok(None);
     }
+    crate::wasm_trace::stage("turn/run: ran session start hooks");
     let mut can_drain_pending_input = input.is_empty();
+    crate::wasm_trace::stage("turn/run: recording inputs");
     if run_hooks_and_record_inputs(&sess, &turn_context, &input).await {
         return Ok(None);
     }
+    crate::wasm_trace::stage("turn/run: recorded inputs");
 
+    crate::wasm_trace::stage("turn/run: merging connector selection");
     sess.merge_connector_selection(explicitly_enabled_connectors.clone())
         .await;
+    crate::wasm_trace::stage("turn/run: merged connector selection");
+    crate::wasm_trace::stage("turn/run: setting previous turn settings");
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
         model: turn_context.model_info.slug.clone(),
         comp_hash: turn_context.model_info.comp_hash.clone(),
         realtime_active: Some(turn_context.realtime_active),
     }))
     .await;
+    crate::wasm_trace::stage("turn/run: set previous turn settings");
     for response_item in injection_items {
         sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
             .await;
     }
+    crate::wasm_trace::stage("turn/run: recorded injection items");
 
+    crate::wasm_trace::stage("turn/run: tracking resolved config");
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
+    crate::wasm_trace::stage("turn/run: tracked resolved config");
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
@@ -213,6 +235,7 @@ pub(crate) async fn run_turn(
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
         TurnDiffTracker::with_environment_display_roots(display_roots),
     ));
+    crate::wasm_trace::stage("turn/run: turn diff tracker ready");
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
@@ -227,22 +250,28 @@ pub(crate) async fn run_turn(
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
         let pending_input = if can_drain_pending_input {
+            crate::wasm_trace::stage("turn/run: checking pending input");
             sess.input_queue.get_pending_input(&sess.active_turn).await
         } else {
             Vec::new()
         };
+        crate::wasm_trace::stage("turn/run: pending input ready");
 
+        crate::wasm_trace::stage("turn/run: recording pending input");
         if run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
             break;
         }
+        crate::wasm_trace::stage("turn/run: recorded pending input");
 
         let window_id = sess.current_window_id().await;
+        crate::wasm_trace::stage("turn/run: recording reminder");
         super::rollout_budget::maybe_record_reminder(
             sess.as_ref(),
             turn_context.as_ref(),
             &window_id,
         )
         .await;
+        crate::wasm_trace::stage("turn/run: recorded reminder");
 
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
@@ -1079,28 +1108,38 @@ async fn run_sampling_request(
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
+    crate::wasm_trace::stage("turn/sampling: begin");
     let turn_context = Arc::clone(&step_context.turn);
+    crate::wasm_trace::stage("turn/sampling: building tools");
     let router = built_tools(sess.as_ref(), step_context.as_ref(), &cancellation_token).await?;
+    crate::wasm_trace::stage("turn/sampling: built tools");
 
+    crate::wasm_trace::stage("turn/sampling: loading base instructions");
     let base_instructions = sess.get_base_instructions().await;
+    crate::wasm_trace::stage("turn/sampling: loaded base instructions");
 
+    crate::wasm_trace::stage("turn/sampling: creating tool runtime");
     let tool_runtime = ToolCallRuntime::new(
         Arc::clone(&router),
         Arc::clone(&sess),
         Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
     );
+    crate::wasm_trace::stage("turn/sampling: created tool runtime");
+    crate::wasm_trace::stage("turn/sampling: starting code mode worker");
     let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
         &sess,
         Arc::clone(&step_context),
         Arc::clone(&router),
         Arc::clone(&turn_diff_tracker),
     );
+    crate::wasm_trace::stage("turn/sampling: started code mode worker");
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retries = 0;
     let mut initial_input = Some(input);
     let mut original_input = None;
     loop {
+        crate::wasm_trace::stage("turn/sampling: building prompt input");
         let prompt_input = if let Some(input) = initial_input.take() {
             input
         } else {
@@ -1108,12 +1147,14 @@ async fn run_sampling_request(
                 .await
                 .for_prompt(&turn_context.model_info.input_modalities)
         };
+        crate::wasm_trace::stage("turn/sampling: building prompt");
         let prompt = build_prompt(
             prompt_input,
             router.as_ref(),
             turn_context.as_ref(),
             base_instructions.clone(),
         );
+        crate::wasm_trace::stage("turn/sampling: running try_run_sampling_request");
         let err = match try_run_sampling_request(
             tool_runtime.clone(),
             Arc::clone(&sess),

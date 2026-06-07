@@ -60,6 +60,17 @@ use super::prompt::guardian_policy_prompt_with_config;
 use super::review::guardian_review_session_config;
 
 const GUARDIAN_INTERRUPT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_guardian_session_task(future: impl Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_guardian_session_task(future: impl Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 #[derive(Debug)]
 pub(crate) enum GuardianReviewSessionOutcome {
     Completed(anyhow::Result<Option<String>>),
@@ -223,9 +234,9 @@ impl GuardianReviewSession {
 
     fn shutdown_in_background(self: &Arc<Self>) {
         let review_session = Arc::clone(self);
-        drop(tokio::spawn(async move {
+        spawn_guardian_session_task(async move {
             review_session.shutdown().await;
-        }));
+        });
     }
 
     async fn fork_snapshot(&self) -> Option<GuardianReviewForkSnapshot> {
@@ -275,7 +286,7 @@ impl Drop for EphemeralReviewCleanup {
             return;
         };
         let state = Arc::clone(&self.state);
-        drop(tokio::spawn(async move {
+        spawn_guardian_session_task(async move {
             let review_session = {
                 let mut state = state.lock().await;
                 state
@@ -287,7 +298,7 @@ impl Drop for EphemeralReviewCleanup {
             if let Some(review_session) = review_session {
                 review_session.shutdown().await;
             }
-        }));
+        });
     }
 }
 

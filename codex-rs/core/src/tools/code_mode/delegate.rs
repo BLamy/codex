@@ -22,6 +22,16 @@ use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_dispatch_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_dispatch_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 pub(super) struct CodeModeDispatchBroker {
     dispatch_tx: async_channel::Sender<DispatchMessage>,
     dispatch_rx: async_channel::Receiver<DispatchMessage>,
@@ -59,7 +69,7 @@ impl CodeModeDispatchBroker {
         let dispatch_rx = self.dispatch_rx.clone();
         let dispatch_gates = Arc::clone(&self.dispatch_gates);
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        tokio::spawn(async move {
+        spawn_dispatch_task(async move {
             loop {
                 let message = tokio::select! {
                     _ = &mut shutdown_rx => break,
@@ -107,7 +117,7 @@ impl CodeModeDispatchBroker {
                             continue;
                         }
                         let host = Arc::clone(&host);
-                        tokio::spawn(async move {
+                        spawn_dispatch_task(async move {
                             let response = tokio::select! {
                                 response = host.invoke_tool(
                                     invocation,

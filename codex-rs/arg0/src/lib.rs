@@ -1,25 +1,38 @@
-use std::ffi::OsString;
-use std::fs::File;
 use std::future::Future;
-use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::OsString;
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_exec_server::CODEX_FS_HELPER_ARG1;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_install_context::InstallContext;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_home_dir::find_codex_home;
 #[cfg(target_os = "windows")]
 use codex_windows_sandbox::CODEX_WINDOWS_SANDBOX_ARG1;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 use std::os::unix::fs::symlink;
+#[cfg(not(target_arch = "wasm32"))]
 use tempfile::TempDir;
 
+#[cfg(not(target_arch = "wasm32"))]
 const APPLY_PATCH_ARG0: &str = "apply_patch";
+#[cfg(not(target_arch = "wasm32"))]
 const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
-#[cfg(unix)]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 const EXECVE_WRAPPER_ARG0: &str = "codex-execve-wrapper";
+#[cfg(not(target_arch = "wasm32"))]
 const LOCK_FILENAME: &str = ".lock";
+#[cfg(not(target_arch = "wasm32"))]
 const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -35,12 +48,14 @@ pub struct Arg0DispatchPaths {
 }
 
 /// Keeps the per-session PATH entry alive and locked for the process lifetime.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Arg0PathEntryGuard {
     _temp_dir: TempDir,
     _lock_file: File,
     paths: Arg0DispatchPaths,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Arg0PathEntryGuard {
     fn new(temp_dir: TempDir, lock_file: File, paths: Arg0DispatchPaths) -> Self {
         Self {
@@ -55,6 +70,7 @@ impl Arg0PathEntryGuard {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
     // Determine if we were invoked via the special alias.
     let mut args = std::env::args_os();
@@ -162,6 +178,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
     path_entry_guard
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn prepare_path_env_var_with_aliases(
     install_context: &InstallContext,
     existing_path: Option<OsString>,
@@ -205,6 +222,7 @@ fn prepare_path_env_var_with_aliases(
 ///
 /// This function should be used to wrap any `main()` function in binary crates
 /// in this workspace that depends on these helper CLIs.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn arg0_dispatch_or_else<F, Fut>(main_fn: F) -> anyhow::Result<()>
 where
     F: FnOnce(Arg0DispatchPaths) -> Fut + Send + 'static,
@@ -236,6 +254,16 @@ where
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn arg0_dispatch_or_else<F, Fut>(_main_fn: F) -> anyhow::Result<()>
+where
+    F: FnOnce(Arg0DispatchPaths) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_main_with_arg0_guard<F, Fut>(
     path_entry_guard: Option<Arg0PathEntryGuard>,
     current_exe: Option<PathBuf>,
@@ -264,6 +292,7 @@ where
     result
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn linux_sandbox_exe_path(
     path_entry_guard: Option<&Arg0PathEntryGuard>,
     current_exe: Option<PathBuf>,
@@ -276,6 +305,7 @@ fn linux_sandbox_exe_path(
         .or(current_exe)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
@@ -283,12 +313,14 @@ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     Ok(builder.build()?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
 /// Load env vars from ~/.codex/.env.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
+#[cfg(not(target_arch = "wasm32"))]
 fn load_dotenv() {
     if let Ok(codex_home) = find_codex_home()
         && let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env"))
@@ -298,6 +330,7 @@ fn load_dotenv() {
 }
 
 /// Helper to set vars from a dotenvy iterator while filtering out `CODEX_` keys.
+#[cfg(not(target_arch = "wasm32"))]
 fn set_filtered<I>(iter: I)
 where
     I: IntoIterator<Item = Result<(String, String), dotenvy::Error>>,
@@ -324,6 +357,7 @@ where
 /// Note: In debug builds the temp-dir guard is disabled to ease local testing.
 ///
 /// IMPORTANT: Callers must update PATH before multiple threads are spawned.
+#[cfg(not(target_arch = "wasm32"))]
 fn prepare_path_entry_for_codex_aliases(
     existing_path: Option<OsString>,
 ) -> std::io::Result<(Arg0PathEntryGuard, OsString)> {
@@ -436,6 +470,7 @@ fn prepare_path_entry_for_codex_aliases(
     ))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn path_env_with_package_path_dir(
     install_context: &InstallContext,
     existing_path: Option<OsString>,
@@ -447,6 +482,7 @@ fn path_env_with_package_path_dir(
     Some(path_env_with_entry(path_dir.as_path(), existing_path))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn path_env_with_entry(path_entry: &Path, existing_path: Option<OsString>) -> OsString {
     #[cfg(unix)]
     const PATH_SEPARATOR: &str = ":";
@@ -467,6 +503,7 @@ fn path_env_with_entry(path_entry: &Path, existing_path: Option<OsString>) -> Os
     path_env_var
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
     let entries = match std::fs::read_dir(temp_root) {
         Ok(entries) => entries,
@@ -496,6 +533,7 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
     let lock_path = dir.join(LOCK_FILENAME);
     let lock_file = match File::options().read(true).write(true).open(&lock_path) {
@@ -511,7 +549,7 @@ fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::Arg0DispatchPaths;
     use super::Arg0PathEntryGuard;

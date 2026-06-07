@@ -9,6 +9,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use crate::time::Instant;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
@@ -77,7 +78,7 @@ impl CodeModeWaitHandler {
             {
                 let args: ExecWaitArgs = parse_arguments(&arguments)?;
                 let exec = ExecContext { session, turn };
-                let started_at = std::time::Instant::now();
+                let started_at = Instant::now();
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
                 let wait_response = if args.terminate {
                     exec.session

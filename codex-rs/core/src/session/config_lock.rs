@@ -58,16 +58,13 @@ pub(crate) async fn export_config_lock_if_configured(
     let lock = toml::to_string_pretty(&lock).context("failed to serialize config lock")?;
     let path = export_dir.join(format!("{conversation_id}.config.lock.toml"));
 
-    tokio::fs::create_dir_all(export_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to create config lock export directory {}",
-                export_dir.display()
-            )
-        })?;
-    tokio::fs::write(&path, lock)
-        .await
+    std::fs::create_dir_all(export_dir).with_context(|| {
+        format!(
+            "failed to create config lock export directory {}",
+            export_dir.display()
+        )
+    })?;
+    std::fs::write(&path, lock)
         .with_context(|| format!("failed to write config lock to {}", path.display()))?;
 
     Ok(())
