@@ -1,5 +1,6 @@
 use codex_config::ConfigLayerStack;
 use codex_plugin::PluginHookSource;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 
 use crate::engine::ClaudeHooksEngine;
@@ -222,6 +223,7 @@ pub fn list_hooks(config: HooksConfig) -> HookListOutcome {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn command_from_argv(argv: &[String]) -> Option<Command> {
     let (program, args) = argv.split_first()?;
     if program.is_empty() {
@@ -230,4 +232,13 @@ pub fn command_from_argv(argv: &[String]) -> Option<Command> {
     let mut command = Command::new(program);
     command.args(args);
     Some(command)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn command_from_argv(argv: &[String]) -> Option<Vec<String>> {
+    let (program, _) = argv.split_first()?;
+    if program.is_empty() {
+        return None;
+    }
+    Some(argv.to_vec())
 }

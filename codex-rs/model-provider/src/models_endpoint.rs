@@ -17,6 +17,7 @@ use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::build_reqwest_client;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
@@ -65,7 +66,8 @@ impl OpenAiModelsEndpoint {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn has_command_auth(&self) -> bool {
         self.provider_info.has_command_auth()
@@ -91,7 +93,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         let transport = ReqwestTransport::new(build_reqwest_client());
         let auth_telemetry = auth_header_telemetry(api_auth.as_ref());
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+            auth_mode: auth_mode.map(telemetry_auth_mode_label),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,
             auth_env: self.auth_env(),
@@ -106,6 +108,19 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         .await
         .map_err(|_| CodexErr::Timeout)?
         .map_err(map_api_error)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn telemetry_auth_mode_label(mode: impl Into<TelemetryAuthMode>) -> String {
+    mode.into().to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn telemetry_auth_mode_label(mode: impl ToString) -> String {
+    match mode.to_string().as_str() {
+        "ApiKey" | "api_key" | "api-key" | "apikey" => "ApiKey".to_string(),
+        _ => "Chatgpt".to_string(),
     }
 }
 

@@ -239,12 +239,9 @@ mod tests {
 
         for (file_name, sandbox_policy) in [
             ("danger.txt", SandboxPolicy::DangerFullAccess),
-            (
-                "external.txt",
-                SandboxPolicy::ExternalSandbox {
-                    network_access: NetworkAccess::Restricted,
-                },
-            ),
+            ("external.txt", SandboxPolicy::ExternalSandbox {
+                network_access: NetworkAccess::Restricted,
+            }),
         ] {
             let path =
                 AbsolutePathBuf::from_absolute_path(temp_dir.path().join(file_name).as_path())

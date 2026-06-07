@@ -340,13 +340,10 @@ mod tests {
             .await
             .expect_err("redirect response should not be followed");
 
-        assert!(matches!(
-            error,
-            ExecServerError::EnvironmentRegistryHttp {
-                status: StatusCode::FOUND,
-                ..
-            }
-        ));
+        assert!(matches!(error, ExecServerError::EnvironmentRegistryHttp {
+            status: StatusCode::FOUND,
+            ..
+        }));
     }
 
     #[test]

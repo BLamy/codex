@@ -53,12 +53,15 @@ impl DefaultEnvironmentProvider {
         let mut environments = Vec::new();
         let (exec_server_url, disabled) = normalize_exec_server_url(self.exec_server_url.clone());
 
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(exec_server_url) = exec_server_url {
             environments.push((
                 REMOTE_ENVIRONMENT_ID.to_string(),
                 Environment::remote_inner(exec_server_url, /*local_runtime_paths*/ None),
             ));
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = exec_server_url;
 
         let has_remote = environments
             .iter()

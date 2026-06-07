@@ -39,7 +39,8 @@ pub(crate) struct WebSearchTool {
     pub(crate) settings: SearchSettings,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolCall> for WebSearchTool {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME)

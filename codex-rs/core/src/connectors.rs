@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use async_channel::unbounded;
 pub use codex_app_server_protocol::AppBranding;

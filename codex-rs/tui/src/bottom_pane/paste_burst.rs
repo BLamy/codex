@@ -147,7 +147,10 @@
 //!   incorrectly grouped into a previous burst.
 
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 // Heuristic thresholds for detecting paste-like input bursts.
 // Detect quickly to avoid showing typed prefix before paste is recognized

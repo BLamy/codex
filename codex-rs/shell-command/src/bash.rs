@@ -1,8 +1,12 @@
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::Node;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::Tree;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter_bash::LANGUAGE as BASH;
 
 use crate::shell_detect::ShellType;
@@ -10,6 +14,7 @@ use crate::shell_detect::detect_shell_type;
 
 /// Parse the provided bash source using tree-sitter-bash, returning a Tree on
 /// success or None if parsing failed.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn try_parse_shell(shell_lc_arg: &str) -> Option<Tree> {
     let lang = BASH.into();
     let mut parser = Parser::new();
@@ -19,6 +24,14 @@ pub fn try_parse_shell(shell_lc_arg: &str) -> Option<Tree> {
     parser.parse(shell_lc_arg, old_tree)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub struct Tree;
+
+#[cfg(target_arch = "wasm32")]
+pub fn try_parse_shell(_shell_lc_arg: &str) -> Option<Tree> {
+    None
+}
+
 /// Parse a script which may contain multiple simple commands joined only by
 /// the safe logical/pipe/sequencing operators: `&&`, `||`, `;`, `|`.
 ///
@@ -26,6 +39,7 @@ pub fn try_parse_shell(shell_lc_arg: &str) -> Option<Tree> {
 /// command and the parse tree does not contain disallowed constructs
 /// (parentheses, redirections, substitutions, control flow, etc.). Otherwise
 /// returns `None`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn try_parse_word_only_commands_sequence(tree: &Tree, src: &str) -> Option<Vec<Vec<String>>> {
     if tree.root_node().has_error() {
         return None;
@@ -94,6 +108,11 @@ pub fn try_parse_word_only_commands_sequence(tree: &Tree, src: &str) -> Option<V
     Some(commands)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn try_parse_word_only_commands_sequence(_tree: &Tree, _src: &str) -> Option<Vec<Vec<String>>> {
+    None
+}
+
 pub fn extract_bash_command(command: &[String]) -> Option<(&str, &str)> {
     let [shell, flag, script] = command else {
         return None;
@@ -121,6 +140,7 @@ pub fn parse_shell_lc_plain_commands(command: &[String]) -> Option<Vec<Vec<Strin
 
 /// Returns the parsed argv for a single shell command in a here-doc style
 /// script (`<<`), as long as the script contains exactly one command node.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_shell_lc_single_command_prefix(command: &[String]) -> Option<Vec<String>> {
     let (_, script) = extract_bash_command(command)?;
     let tree = try_parse_shell(script)?;
@@ -139,6 +159,12 @@ pub fn parse_shell_lc_single_command_prefix(command: &[String]) -> Option<Vec<St
     parse_heredoc_command_words(command_node, script)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn parse_shell_lc_single_command_prefix(_command: &[String]) -> Option<Vec<String>> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_plain_command_from_node(cmd: tree_sitter::Node, src: &str) -> Option<Vec<String>> {
     if cmd.kind() != "command" {
         return None;
@@ -197,6 +223,7 @@ fn parse_plain_command_from_node(cmd: tree_sitter::Node, src: &str) -> Option<Ve
     Some(words)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_heredoc_command_words(cmd: Node<'_>, src: &str) -> Option<Vec<String>> {
     if cmd.kind() != "command" {
         return None;
@@ -234,6 +261,7 @@ fn parse_heredoc_command_words(cmd: Node<'_>, src: &str) -> Option<Vec<String>> 
     if words.is_empty() { None } else { Some(words) }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_literal_word_or_number(node: Node<'_>) -> bool {
     if !matches!(node.kind(), "word" | "number") {
         return false;
@@ -242,6 +270,7 @@ fn is_literal_word_or_number(node: Node<'_>) -> bool {
     node.named_children(&mut cursor).next().is_none()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_allowed_heredoc_attachment_kind(kind: &str) -> bool {
     matches!(
         kind,
@@ -253,6 +282,7 @@ fn is_allowed_heredoc_attachment_kind(kind: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn find_single_command_node(root: Node<'_>) -> Option<Node<'_>> {
     let mut stack = vec![root];
     let mut single_command = None;
@@ -272,6 +302,7 @@ fn find_single_command_node(root: Node<'_>) -> Option<Node<'_>> {
     single_command
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn has_named_descendant_kind(node: Node<'_>, kind: &str) -> bool {
     let mut stack = vec![node];
     while let Some(current) = stack.pop() {
@@ -286,6 +317,7 @@ fn has_named_descendant_kind(node: Node<'_>, kind: &str) -> bool {
     false
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_double_quoted_string(node: Node, src: &str) -> Option<String> {
     if node.kind() != "string" {
         return None;
@@ -304,6 +336,7 @@ fn parse_double_quoted_string(node: Node, src: &str) -> Option<String> {
     Some(stripped.to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_raw_string(node: Node, src: &str) -> Option<String> {
     if node.kind() != "raw_string" {
         return None;

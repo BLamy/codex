@@ -935,7 +935,8 @@ struct MultiAgentV2NamespaceOverride {
     namespace: String,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for MultiAgentV2NamespaceOverride {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(self.namespace.clone(), self.handler.tool_name().name)

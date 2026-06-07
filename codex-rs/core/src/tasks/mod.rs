@@ -6,13 +6,17 @@ mod user_shell;
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use codex_extension_api::ExtensionData;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use tokio::select;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::Span;
@@ -32,6 +36,7 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
+use crate::state::TaskAbortHandle;
 use crate::state::TaskKind;
 use codex_analytics::TurnTokenUsageFact;
 use codex_login::AuthManager;
@@ -204,7 +209,17 @@ impl SessionTaskContext {
 /// intentionally small: implementers identify themselves via
 /// [`SessionTask::kind`], perform their work in [`SessionTask::run`], and may
 /// release resources in [`SessionTask::abort`].
-pub(crate) trait SessionTask: Send + Sync + 'static {
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) trait SessionTaskRuntimeBounds: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T> SessionTaskRuntimeBounds for T where T: Send + Sync {}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) trait SessionTaskRuntimeBounds {}
+#[cfg(target_arch = "wasm32")]
+impl<T> SessionTaskRuntimeBounds for T {}
+
+pub(crate) trait SessionTask: SessionTaskRuntimeBounds + 'static {
     /// Describes the type of work the task performs so the session can
     /// surface it in telemetry and UI.
     fn kind(&self) -> TaskKind;
@@ -220,6 +235,7 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
     /// abort; implementers should watch for it and terminate quickly once it
     /// fires. Returning [`Some`] yields a final message that
     /// [`Session::on_task_finished`] will emit to the client.
+    #[cfg(not(target_arch = "wasm32"))]
     fn run(
         self: Arc<Self>,
         session: Arc<SessionTaskContext>,
@@ -227,12 +243,21 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
         input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Option<String>> + Send;
+    #[cfg(target_arch = "wasm32")]
+    fn run(
+        self: Arc<Self>,
+        session: Arc<SessionTaskContext>,
+        ctx: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        cancellation_token: CancellationToken,
+    ) -> impl std::future::Future<Output = Option<String>>;
 
     /// Gives the task a chance to perform cleanup after an abort.
     ///
     /// The default implementation is a no-op; override this if additional
     /// teardown or notifications are required once
     /// [`Session::abort_all_tasks`] cancels the task.
+    #[cfg(not(target_arch = "wasm32"))]
     fn abort(
         &self,
         session: Arc<SessionTaskContext>,
@@ -242,9 +267,19 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
             let _ = (session, ctx);
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    fn abort(
+        &self,
+        session: Arc<SessionTaskContext>,
+        ctx: Arc<TurnContext>,
+    ) -> impl std::future::Future<Output = ()> {
+        async move {
+            let _ = (session, ctx);
+        }
+    }
 }
 
-pub(crate) trait AnySessionTask: Send + Sync + 'static {
+pub(crate) trait AnySessionTask: SessionTaskRuntimeBounds + 'static {
     fn kind(&self) -> TaskKind;
 
     fn span_name(&self) -> &'static str;
@@ -394,8 +429,7 @@ impl Session {
             codex.turn.token_usage.reasoning_output_tokens = field::Empty,
             codex.turn.token_usage.total_tokens = field::Empty,
         );
-        let handle = tokio::spawn(
-            async move {
+        let task_future = async move {
                 let ctx_for_finish = Arc::clone(&ctx);
                 let last_agent_message = task_for_run
                     .run(
@@ -425,15 +459,15 @@ impl Session {
                 }
                 done_clone.notify_waiters();
             }
-            .instrument(task_span),
-        );
+            .instrument(task_span);
+        let handle = spawn_turn_task(task_future);
         let timer = turn_context
             .session_telemetry
             .start_timer(TURN_E2E_DURATION_METRIC, &[])
             .ok();
         let running_task = RunningTask {
             done,
-            handle: AbortOnDropHandle::new(handle),
+            handle,
             kind: task_kind,
             task,
             cancellation_token,
@@ -881,6 +915,19 @@ impl Session {
             .await
             .clear_turn(&task.turn_context.sub_id);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_turn_task(
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> TaskAbortHandle {
+    AbortOnDropHandle::new(tokio::spawn(future))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_turn_task(future: impl std::future::Future<Output = ()> + 'static) -> TaskAbortHandle {
+    wasm_bindgen_futures::spawn_local(future);
+    TaskAbortHandle
 }
 
 #[cfg(test)]

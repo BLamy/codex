@@ -28,7 +28,10 @@ impl ConversationHistory {
 }
 
 /// Future returned when an extension tool emits a visible turn-item lifecycle event.
+#[cfg(not(target_arch = "wasm32"))]
 pub type TurnItemEmissionFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+pub type TurnItemEmissionFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 
 /// Visible turn items that an extension may publish into the host lifecycle.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +44,16 @@ pub enum ExtensionTurnItem {
 ///
 /// Implementations route lifecycle events through the host's normal item event
 /// pipeline, including any persistence and client delivery owned by the host.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait TurnItemEmitter: Send + Sync {
+    /// Emits the beginning of one visible turn item.
+    fn emit_started<'a>(&'a self, item: ExtensionTurnItem) -> TurnItemEmissionFuture<'a>;
+
+    /// Emits one visible turn item after host-owned finalization.
+    fn emit_completed<'a>(&'a self, item: ExtensionTurnItem) -> TurnItemEmissionFuture<'a>;
+}
+#[cfg(target_arch = "wasm32")]
+pub trait TurnItemEmitter {
     /// Emits the beginning of one visible turn item.
     fn emit_started<'a>(&'a self, item: ExtensionTurnItem) -> TurnItemEmissionFuture<'a>;
 

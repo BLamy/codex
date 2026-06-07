@@ -78,7 +78,8 @@ enum ImagegenAction {
     Edit,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolCall> for ImageGenerationTool {
     /// Keeps the tool in the existing image-generation Responses namespace.
     fn tool_name(&self) -> ToolName {

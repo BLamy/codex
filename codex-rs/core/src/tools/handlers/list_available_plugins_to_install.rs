@@ -54,7 +54,8 @@ impl ListAvailablePluginsToInstallHandler {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for ListAvailablePluginsToInstallHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME)

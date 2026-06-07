@@ -2,8 +2,11 @@ use codex_network_proxy::NetworkProxy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Stdio;
-use tokio::process::Child;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use tokio::process::Child;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 use tracing::trace;
 
@@ -48,6 +51,17 @@ pub(crate) struct SpawnChildRequest<'a> {
     pub env: HashMap<String, String>,
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct Child;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn spawn_child_async(_request: SpawnChildRequest<'_>) -> std::io::Result<Child> {
+    Err(std::io::Error::other(
+        "browser process execution requires an almostnode host process shim",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io::Result<Child> {
     let SpawnChildRequest {
         program,

@@ -285,7 +285,8 @@ fn use_bedrock_provider(turn: &mut TurnContext) {
 
 struct WebRunExtensionTool;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ExtensionToolCall> for WebRunExtensionTool {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced("web", "run")
@@ -316,7 +317,8 @@ impl ToolExecutor<ExtensionToolCall> for WebRunExtensionTool {
 
 struct DeferredExtensionTool;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ExtensionToolCall> for DeferredExtensionTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("extension_echo")

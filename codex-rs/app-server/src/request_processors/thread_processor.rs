@@ -965,7 +965,7 @@ impl ThreadRequestProcessor {
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
     ) -> Result<(), JSONRPCErrorError> {
-        let thread_start_started_at = std::time::Instant::now();
+        let thread_start_started_at = Instant::now();
         let requested_cwd = typesafe_overrides.cwd.clone();
         let mut config = config_manager
             .load_with_overrides(config_overrides.clone(), typesafe_overrides.clone())
@@ -1059,7 +1059,7 @@ impl ThreadRequestProcessor {
                 .collect()
         };
         let core_dynamic_tool_count = core_dynamic_tools.len();
-        let create_thread_started_at = std::time::Instant::now();
+        let create_thread_started_at = Instant::now();
         let NewThread {
             thread_id,
             thread,

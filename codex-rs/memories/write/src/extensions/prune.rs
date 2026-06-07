@@ -13,7 +13,7 @@ pub async fn prune_old_extension_resources(memory_root: &Path) {
 async fn prune_old_extension_resources_with_now(memory_root: &Path, now: DateTime<Utc>) {
     let cutoff = now - Duration::days(crate::extension_resources::RETENTION_DAYS);
     let extensions_root = memory_extensions_root(memory_root);
-    let mut extensions = match tokio::fs::read_dir(&extensions_root).await {
+    let mut extensions = match crate::fs::read_dir(&extensions_root).await {
         Ok(extensions) => extensions,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
         Err(err) => {
@@ -31,7 +31,7 @@ async fn prune_old_extension_resources_with_now(memory_root: &Path, now: DateTim
             continue;
         };
         if !file_type.is_dir()
-            || !tokio::fs::try_exists(extension_path.join("instructions.md"))
+            || !crate::fs::try_exists(extension_path.join("instructions.md"))
                 .await
                 .unwrap_or(false)
         {
@@ -39,7 +39,7 @@ async fn prune_old_extension_resources_with_now(memory_root: &Path, now: DateTim
         }
 
         let resources_path = extension_path.join("resources");
-        let mut resources = match tokio::fs::read_dir(&resources_path).await {
+        let mut resources = match crate::fs::read_dir(&resources_path).await {
             Ok(resources) => resources,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
             Err(err) => {
@@ -75,7 +75,7 @@ async fn prune_old_extension_resources_with_now(memory_root: &Path, now: DateTim
                 continue;
             }
 
-            if let Err(err) = tokio::fs::remove_file(&resource_file_path).await
+            if let Err(err) = crate::fs::remove_file(&resource_file_path).await
                 && err.kind() != std::io::ErrorKind::NotFound
             {
                 warn!(

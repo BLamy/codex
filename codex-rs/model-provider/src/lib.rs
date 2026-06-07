@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 mod amazon_bedrock;
 mod auth;
 mod bearer_auth_provider;

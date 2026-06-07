@@ -84,7 +84,14 @@ pub fn parse_powershell_command_into_plain_commands(
 
 /// This function attempts to find a powershell.exe executable on the system.
 pub fn try_find_powershell_executable_blocking() -> Option<AbsolutePathBuf> {
-    try_find_powershellish_executable_in_path(&["powershell.exe"])
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        try_find_powershellish_executable_in_path(&["powershell.exe"])
+    }
 }
 
 /// This function attempts to find a pwsh.exe executable on the system.
@@ -98,29 +105,37 @@ pub fn try_find_powershell_executable_blocking() -> Option<AbsolutePathBuf> {
 /// has installed pwsh.exe, it may not be available in the system PATH, in which
 /// case we attempt to locate it via other means.
 pub fn try_find_pwsh_executable_blocking() -> Option<AbsolutePathBuf> {
-    if let Some(ps_home) = std::process::Command::new("cmd")
-        .args(["/C", "pwsh", "-NoProfile", "-Command", "$PSHOME"])
-        .output()
-        .ok()
-        .and_then(|out| {
-            if !out.status.success() {
-                return None;
-            }
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let trimmed = stdout.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        })
+    #[cfg(target_arch = "wasm32")]
     {
-        let candidate = AbsolutePathBuf::resolve_path_against_base("pwsh.exe", &ps_home);
-
-        if is_powershellish_executable_available(candidate.as_path()) {
-            return Some(candidate);
-        }
+        None
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Some(ps_home) = std::process::Command::new("cmd")
+            .args(["/C", "pwsh", "-NoProfile", "-Command", "$PSHOME"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                if !out.status.success() {
+                    return None;
+                }
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let trimmed = stdout.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+        {
+            let candidate = AbsolutePathBuf::resolve_path_against_base("pwsh.exe", &ps_home);
 
-    try_find_powershellish_executable_in_path(&["pwsh.exe"])
+            if is_powershellish_executable_available(candidate.as_path()) {
+                return Some(candidate);
+            }
+        }
+
+        try_find_powershellish_executable_in_path(&["pwsh.exe"])
+    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn try_find_powershellish_executable_in_path(candidates: &[&str]) -> Option<AbsolutePathBuf> {
     for candidate in candidates {
         let Ok(resolved_path) = which::which(candidate) else {
@@ -141,6 +156,7 @@ fn try_find_powershellish_executable_in_path(candidates: &[&str]) -> Option<Abso
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_powershellish_executable_available(powershell_or_pwsh_exe: &std::path::Path) -> bool {
     // This test works for both powershell.exe and pwsh.exe.
     std::process::Command::new(powershell_or_pwsh_exe)

@@ -35,7 +35,8 @@ use tokio::sync::watch;
 
 struct StaticReloader;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ConfigReloader for StaticReloader {
     fn source_label(&self) -> String {
         "test config state".to_string()

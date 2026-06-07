@@ -16,7 +16,9 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
 use tracing::debug;
 use tracing::trace;
@@ -61,7 +63,7 @@ pub fn spawn_response_stream(
         let _ = turn_state.set(header_value.to_string());
     }
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
-    tokio::spawn(async move {
+    let task = async move {
         if let Some(model) = server_model {
             let _ = tx_event.send(Ok(ResponseEvent::ServerModel(model))).await;
         }
@@ -77,7 +79,13 @@ pub fn spawn_response_stream(
                 .await;
         }
         process_sse(stream_response.bytes, tx_event, idle_timeout, telemetry).await;
-    });
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::spawn(task);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(task);
 
     ResponseStream {
         rx_event,
@@ -407,11 +415,23 @@ pub async fn process_sse(
     let mut last_server_model: Option<String> = None;
 
     loop {
+        #[cfg(target_arch = "wasm32")]
+        let _ = idle_timeout;
+        #[cfg(target_arch = "wasm32")]
+        let _ = &telemetry;
+
+        #[cfg(not(target_arch = "wasm32"))]
         let start = Instant::now();
+
+        #[cfg(not(target_arch = "wasm32"))]
         let response = timeout(idle_timeout, stream.next()).await;
+
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(t) = telemetry.as_ref() {
             t.on_sse_poll(&response, start.elapsed());
         }
+
+        #[cfg(not(target_arch = "wasm32"))]
         let sse = match response {
             Ok(Some(Ok(sse))) => sse,
             Ok(Some(Err(e))) => {
@@ -430,6 +450,23 @@ pub async fn process_sse(
                 let _ = tx_event
                     .send(Err(ApiError::Stream("idle timeout waiting for SSE".into())))
                     .await;
+                return;
+            }
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let sse = match stream.next().await {
+            Some(Ok(sse)) => sse,
+            Some(Err(e)) => {
+                debug!("SSE Error: {e:#}");
+                let _ = tx_event.send(Err(ApiError::Stream(e.to_string()))).await;
+                return;
+            }
+            None => {
+                let error = response_error.unwrap_or(ApiError::Stream(
+                    "stream closed before response.completed".into(),
+                ));
+                let _ = tx_event.send(Err(error)).await;
                 return;
             }
         };

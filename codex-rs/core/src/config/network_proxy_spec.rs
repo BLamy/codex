@@ -58,7 +58,8 @@ impl StaticNetworkProxyReloader {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ConfigReloader for StaticNetworkProxyReloader {
     async fn maybe_reload(&self) -> anyhow::Result<Option<ConfigState>> {
         Ok(None)

@@ -11,7 +11,10 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
 use std::cell::RefCell;
-use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::key_hint::has_ctrl_or_alt;
 use crate::render::renderable::Renderable;

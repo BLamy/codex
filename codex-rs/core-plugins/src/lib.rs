@@ -1,3 +1,4 @@
+mod background_task;
 mod discoverable;
 pub mod installed_marketplaces;
 pub mod loader;
@@ -9,9 +10,21 @@ pub mod marketplace_remove;
 pub mod marketplace_upgrade;
 mod plugin_bundle_archive;
 pub mod remote;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod remote_bundle;
+#[cfg(target_arch = "wasm32")]
+#[path = "remote_bundle_wasm.rs"]
 pub mod remote_bundle;
 pub mod remote_legacy;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod startup_remote_sync;
+#[cfg(target_arch = "wasm32")]
+#[path = "startup_remote_sync_wasm.rs"]
+pub(crate) mod startup_remote_sync;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod startup_sync;
+#[cfg(target_arch = "wasm32")]
+#[path = "startup_sync_wasm.rs"]
 pub mod startup_sync;
 pub mod store;
 #[cfg(test)]

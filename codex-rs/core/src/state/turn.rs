@@ -5,7 +5,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::task::AbortOnDropHandle;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type TaskAbortHandle = AbortOnDropHandle<()>;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct TaskAbortHandle;
+
+#[cfg(target_arch = "wasm32")]
+impl TaskAbortHandle {
+    pub(crate) fn abort(&self) {}
+
+    pub(crate) fn detach(self) {}
+}
 
 use codex_extension_api::ExtensionData;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
@@ -73,7 +87,7 @@ pub(crate) struct RunningTask {
     pub(crate) kind: TaskKind,
     pub(crate) task: Arc<dyn AnySessionTask>,
     pub(crate) cancellation_token: CancellationToken,
-    pub(crate) handle: AbortOnDropHandle<()>,
+    pub(crate) handle: TaskAbortHandle,
     pub(crate) turn_context: Arc<TurnContext>,
     pub(crate) turn_extension_data: Arc<ExtensionData>,
     // Timer recorded when the task drops to capture the full turn duration.

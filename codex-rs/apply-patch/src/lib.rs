@@ -1,6 +1,7 @@
 mod invocation;
 mod parser;
 mod seek_sequence;
+#[cfg(not(target_arch = "wasm32"))]
 mod standalone_executable;
 mod streaming_parser;
 
@@ -27,7 +28,13 @@ use thiserror::Error;
 
 pub use invocation::maybe_parse_apply_patch_verified;
 pub use invocation::verify_apply_patch_args;
+#[cfg(not(target_arch = "wasm32"))]
 pub use standalone_executable::main;
+
+#[cfg(target_arch = "wasm32")]
+pub fn main() -> ! {
+    panic!("standalone apply_patch executable is not available on wasm32")
+}
 
 use crate::invocation::ExtractHeredocError;
 

@@ -32,6 +32,7 @@ use codex_rollout_trace::ThreadTraceContext;
 use codex_thread_store::LiveThread;
 use codex_thread_store::ThreadStore;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
@@ -59,6 +60,7 @@ pub(crate) struct SessionServices {
     pub(crate) tool_approvals: Mutex<ApprovalStore>,
     pub(crate) guardian_rejections: Mutex<HashMap<String, GuardianRejection>>,
     pub(crate) guardian_rejection_circuit_breaker: Mutex<GuardianRejectionCircuitBreaker>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) runtime_handle: Handle,
     pub(crate) skills_manager: Arc<SkillsManager>,
     pub(crate) plugins_manager: Arc<PluginsManager>,

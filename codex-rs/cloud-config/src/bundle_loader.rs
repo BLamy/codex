@@ -22,6 +22,14 @@ pub fn cloud_config_bundle_loader(
     chatgpt_base_url: String,
     codex_home: PathBuf,
 ) -> CloudConfigBundleLoader {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (auth_manager, chatgpt_base_url, codex_home);
+        return CloudConfigBundleLoader::default();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
     let service = CloudConfigBundleService::new(
         auth_manager,
         Arc::new(BackendBundleClient::new(chatgpt_base_url)),
@@ -49,6 +57,7 @@ pub fn cloud_config_bundle_loader(
             )
         })?
     })
+    }
 }
 
 pub async fn cloud_config_bundle_loader_for_storage(

@@ -10,8 +10,13 @@ use http::StatusCode;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::tungstenite::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::tungstenite::Message;
 
 /// Generic telemetry.
@@ -35,9 +40,17 @@ pub trait SseTelemetry: Send + Sync {
 pub trait WebsocketTelemetry: Send + Sync {
     fn on_ws_request(&self, duration: Duration, error: Option<&ApiError>, connection_reused: bool);
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_ws_event(
         &self,
         result: &Result<Option<Result<Message, Error>>, ApiError>,
+        duration: Duration,
+    );
+
+    #[cfg(target_arch = "wasm32")]
+    fn on_ws_event(
+        &self,
+        result: &Result<Option<Result<(), ApiError>>, ApiError>,
         duration: Duration,
     );
 }

@@ -33,6 +33,7 @@ use crate::thread_config::ThreadConfigContext;
 use crate::thread_config::ThreadConfigLoader;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_file_system::ExecutorFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode;
@@ -617,6 +618,11 @@ fn system_requirements_toml_file() -> io::Result<AbsolutePathBuf> {
     windows_system_requirements_toml_file()
 }
 
+#[cfg(not(any(unix, windows)))]
+fn system_requirements_toml_file() -> io::Result<AbsolutePathBuf> {
+    AbsolutePathBuf::from_absolute_path(Path::new("/etc/codex/requirements.toml"))
+}
+
 fn system_requirements_toml_file_with_overrides(
     overrides: &LoaderOverrides,
 ) -> io::Result<AbsolutePathBuf> {
@@ -634,6 +640,11 @@ pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
 #[cfg(windows)]
 pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
     windows_system_config_toml_file()
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
+    AbsolutePathBuf::from_absolute_path(Path::new("/etc/codex/config.toml"))
 }
 
 fn system_config_toml_file_with_overrides(
@@ -987,7 +998,7 @@ async fn project_trust_context(
         .cloned()
         .unwrap_or_else(|| project_trust_key(project_root.as_path()));
     let checkout_root = find_git_checkout_root(fs, cwd).await;
-    let repo_root = resolve_root_git_project_for_trust(fs, cwd).await;
+    let repo_root = resolve_root_git_project_for_trust_for_target(fs, cwd).await;
     let repo_root_lookup_keys = repo_root
         .as_ref()
         .map(|root| normalized_project_trust_keys(root.as_path()));
@@ -1011,6 +1022,22 @@ async fn project_trust_context(
         projects_trust,
         user_config_file: user_config_file.clone(),
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn resolve_root_git_project_for_trust_for_target(
+    fs: &dyn ExecutorFileSystem,
+    cwd: &Path,
+) -> Option<AbsolutePathBuf> {
+    resolve_root_git_project_for_trust(fs, cwd).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn resolve_root_git_project_for_trust_for_target(
+    _fs: &dyn ExecutorFileSystem,
+    _cwd: &Path,
+) -> Option<AbsolutePathBuf> {
+    None
 }
 
 /// Canonicalize the path and convert it to a string to be used as a key in the

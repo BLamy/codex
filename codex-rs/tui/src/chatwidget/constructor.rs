@@ -7,7 +7,7 @@ impl ChatWidget {
         Self::new_with_op_target(common, CodexOpTarget::AppEvent)
     }
 
-    pub(super) fn new_with_op_target(
+    pub(crate) fn new_with_op_target(
         common: ChatWidgetInit,
         codex_op_target: CodexOpTarget,
     ) -> Self {

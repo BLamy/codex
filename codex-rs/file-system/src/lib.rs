@@ -131,7 +131,8 @@ pub type FileSystemResult<T> = io::Result<T>;
 
 /// Abstract filesystem access used by components that may operate locally or via
 /// a remote environment.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ExecutorFileSystem: Send + Sync {
     /// Resolves a path within this filesystem.
     async fn canonicalize(

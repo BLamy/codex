@@ -14,8 +14,8 @@ use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use crate::time::SystemTime;
+use crate::time::UNIX_EPOCH;
 use toml::Value as TomlValue;
 
 const EXTERNAL_CONFIG_MIGRATION_PROMPT_COOLDOWN_SECS: i64 = 5 * 24 * 60 * 60;

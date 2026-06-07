@@ -1,6 +1,7 @@
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::io;
@@ -8,18 +9,21 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use async_channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncRead;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::BufReader;
-use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
 
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::SandboxPermissions;
+use crate::spawn::Child;
 use crate::spawn::SpawnChildRequest;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
@@ -37,14 +41,28 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
 use codex_protocol::protocol::ExecOutputStream;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecBackend;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecOutputStream as HostExecOutputStream;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecParams as HostExecParams;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecProcessEvent;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LocalProcess;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ProcessId;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
 use codex_sandboxing::SandboxablePreference;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_sandboxing::compatibility_sandbox_policy_for_permission_profile;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_pty::process_group::kill_child_process_group;
 
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
@@ -520,7 +538,167 @@ async fn get_raw_output_result(
         .await;
     }
 
-    exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
+    #[cfg(target_arch = "wasm32")]
+    {
+        return exec_wasm_host(params, network_sandbox_policy, stdout_stream, after_spawn).await;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn exec_wasm_host(
+    params: ExecParams,
+    network_sandbox_policy: NetworkSandboxPolicy,
+    stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+) -> Result<RawExecToolCallOutput> {
+    let ExecParams {
+        command,
+        cwd,
+        mut env,
+        network,
+        arg0,
+        expiration,
+        capture_policy,
+
+        // If applicable, these fields should have been honored upstream of
+        // this exec call.
+        windows_sandbox_level: _,
+        windows_sandbox_private_desktop: _,
+        // These fields are related to approvals, so can be ignored here.
+        sandbox_permissions: _,
+        justification: _,
+    } = params;
+
+    if command.is_empty() {
+        return Err(CodexErr::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "command args are empty",
+        )));
+    }
+
+    if let Some(network) = network.as_ref() {
+        network.apply_to_env(&mut env);
+    }
+    if !network_sandbox_policy.is_enabled() {
+        env.insert(
+            crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
+            "1".to_string(),
+        );
+    }
+
+    let process_id = ProcessId::new(uuid::Uuid::new_v4().to_string());
+    let backend = LocalProcess::default();
+    let started = backend
+        .start(HostExecParams {
+            process_id,
+            argv: command,
+            cwd: cwd.as_path().to_path_buf(),
+            env_policy: None,
+            env,
+            tty: false,
+            pipe_stdin: false,
+            arg0,
+        })
+        .await
+        .map_err(|err| CodexErr::Io(io::Error::other(err.to_string())))?;
+
+    if let Some(after_spawn) = after_spawn {
+        after_spawn();
+    }
+
+    let mut events = started.process.subscribe_events();
+    let retained_bytes_cap = capture_policy.retained_bytes_cap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut emitted_deltas: usize = 0;
+    let mut exit_code: Option<i32> = None;
+    let mut timed_out = false;
+
+    let expiration_wait = async {
+        if capture_policy.uses_expiration() {
+            Some(expiration.wait_with_outcome().await)
+        } else {
+            std::future::pending::<Option<ExecExpirationOutcome>>().await
+        }
+    };
+    tokio::pin!(expiration_wait);
+
+    loop {
+        tokio::select! {
+            event_result = events.recv() => {
+                match event_result {
+                    Ok(ExecProcessEvent::Output(chunk)) => {
+                        let is_stderr = matches!(chunk.stream, HostExecOutputStream::Stderr);
+                        let bytes = chunk.chunk.into_inner();
+                        emit_exec_output_delta(&stdout_stream, &bytes, is_stderr, &mut emitted_deltas).await;
+                        if let Some(max_bytes) = retained_bytes_cap {
+                            if is_stderr {
+                                append_capped(&mut stderr, &bytes, max_bytes);
+                            } else {
+                                append_capped(&mut stdout, &bytes, max_bytes);
+                            }
+                        } else if is_stderr {
+                            stderr.extend_from_slice(&bytes);
+                        } else {
+                            stdout.extend_from_slice(&bytes);
+                        }
+                    }
+                    Ok(ExecProcessEvent::Exited { exit_code: code, .. }) => {
+                        exit_code = Some(code);
+                    }
+                    Ok(ExecProcessEvent::Closed { .. }) => {
+                        break;
+                    }
+                    Ok(ExecProcessEvent::Failed(message)) => {
+                        return Err(CodexErr::Io(io::Error::other(message)));
+                    }
+                    Err(err) => {
+                        return Err(CodexErr::Io(io::Error::other(err.to_string())));
+                    }
+                }
+            }
+            outcome = &mut expiration_wait => {
+                match outcome {
+                    Some(ExecExpirationOutcome::TimedOut) => {
+                        let _ = started.process.terminate().await;
+                        timed_out = true;
+                        exit_code = Some(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE);
+                    }
+                    Some(ExecExpirationOutcome::Cancelled) => {
+                        let _ = started.process.terminate().await;
+                        exit_code = Some(1);
+                    }
+                    None => unreachable!("expiration wait only resolves while expiration is active"),
+                }
+                break;
+            }
+        }
+    }
+
+    let exit_code = exit_code.unwrap_or(0);
+    let stdout = StreamOutput {
+        text: stdout,
+        truncated_after_lines: None,
+    };
+    let stderr = StreamOutput {
+        text: stderr,
+        truncated_after_lines: None,
+    };
+    let aggregated_output = aggregate_output(&stdout, &stderr, retained_bytes_cap);
+
+    Ok(RawExecToolCallOutput {
+        exit_status: synthetic_exit_status_for_code(exit_code),
+        exit_code_override: Some(exit_code),
+        stdout,
+        stderr,
+        aggregated_output,
+        timed_out,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -739,6 +917,7 @@ async fn exec_windows_sandbox(
 
     Ok(RawExecToolCallOutput {
         exit_status,
+        exit_code_override: None,
         stdout,
         stderr,
         aggregated_output,
@@ -767,7 +946,10 @@ fn finalize_exec_result(
                 }
             }
 
-            let mut exit_code = raw_output.exit_status.code().unwrap_or(-1);
+            let mut exit_code = raw_output
+                .exit_code_override
+                .or_else(|| raw_output.exit_status.code())
+                .unwrap_or(-1);
             if timed_out {
                 exit_code = EXEC_TIMEOUT_EXIT_CODE;
             }
@@ -871,6 +1053,7 @@ pub(crate) fn is_likely_sandbox_denied(
 #[derive(Debug)]
 struct RawExecToolCallOutput {
     pub exit_status: ExitStatus,
+    pub exit_code_override: Option<i32>,
     pub stdout: StreamOutput<Vec<u8>>,
     pub stderr: StreamOutput<Vec<u8>>,
     pub aggregated_output: StreamOutput<Vec<u8>>,
@@ -1041,134 +1224,151 @@ pub(crate) fn resolve_windows_restricted_token_filesystem_overrides(
     sandbox_policy_cwd: &AbsolutePathBuf,
     windows_sandbox_level: WindowsSandboxLevel,
 ) -> std::result::Result<Option<WindowsSandboxFilesystemOverrides>, String> {
-    if sandbox != SandboxType::WindowsRestrictedToken
-        || windows_sandbox_level == WindowsSandboxLevel::Elevated
+    #[cfg(target_arch = "wasm32")]
     {
+        let _ = (
+            sandbox,
+            permission_profile,
+            sandbox_policy_cwd,
+            windows_sandbox_level,
+        );
         return Ok(None);
     }
 
-    let (file_system_sandbox_policy, network_sandbox_policy) =
-        permission_profile.to_runtime_permissions();
-
-    let needs_direct_runtime_enforcement = file_system_sandbox_policy
-        .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd);
-
-    if permission_profile_supports_windows_restricted_token_sandbox(permission_profile)
-        && !needs_direct_runtime_enforcement
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        return Ok(None);
-    }
+        if sandbox != SandboxType::WindowsRestrictedToken
+            || windows_sandbox_level == WindowsSandboxLevel::Elevated
+        {
+            return Ok(None);
+        }
 
-    if !permission_profile_supports_windows_restricted_token_sandbox(permission_profile) {
-        let permission_profile_name = permission_profile_display_name(permission_profile);
-        return Err(format!(
-            "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, permission_profile={permission_profile_name}; refusing to run unsandboxed",
-            file_system_sandbox_policy.kind,
-        ));
-    }
+        let (file_system_sandbox_policy, network_sandbox_policy) =
+            permission_profile.to_runtime_permissions();
 
-    // The restricted-token backend can still enforce split write restrictions,
-    // but its WRITE_RESTRICTED token does not make capability SID deny-read ACEs
-    // participate in read access checks. Read restrictions therefore require the
-    // elevated backend, even when the filesystem root remains readable.
-    if !windows_policy_has_root_read_access(&file_system_sandbox_policy, sandbox_policy_cwd) {
-        return Err(
+        let needs_direct_runtime_enforcement = file_system_sandbox_policy
+            .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd);
+
+        if permission_profile_supports_windows_restricted_token_sandbox(permission_profile)
+            && !needs_direct_runtime_enforcement
+        {
+            return Ok(None);
+        }
+
+        if !permission_profile_supports_windows_restricted_token_sandbox(permission_profile) {
+            let permission_profile_name = permission_profile_display_name(permission_profile);
+            return Err(format!(
+                "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, permission_profile={permission_profile_name}; refusing to run unsandboxed",
+                file_system_sandbox_policy.kind,
+            ));
+        }
+
+        // The restricted-token backend can still enforce split write restrictions,
+        // but its WRITE_RESTRICTED token does not make capability SID deny-read ACEs
+        // participate in read access checks. Read restrictions therefore require the
+        // elevated backend, even when the filesystem root remains readable.
+        if !windows_policy_has_root_read_access(&file_system_sandbox_policy, sandbox_policy_cwd) {
+            return Err(
             "windows unelevated restricted-token sandbox cannot enforce split filesystem read restrictions directly; refusing to run unsandboxed"
                 .to_string(),
         );
-    }
+        }
 
-    let additional_deny_read_paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
-        &file_system_sandbox_policy,
-        sandbox_policy_cwd,
-    )?;
-    if !additional_deny_read_paths.is_empty() {
-        return Err(
+        let additional_deny_read_paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
+            &file_system_sandbox_policy,
+            sandbox_policy_cwd,
+        )?;
+        if !additional_deny_read_paths.is_empty() {
+            return Err(
             "windows unelevated restricted-token sandbox cannot enforce deny-read restrictions directly; refusing to run unsandboxed"
                 .to_string(),
         );
-    }
+        }
 
-    let legacy_projection = compatibility_sandbox_policy_for_permission_profile(
-        permission_profile,
-        sandbox_policy_cwd.as_path(),
-    );
-    let legacy_writable_roots = legacy_projection.get_writable_roots_with_cwd(sandbox_policy_cwd);
-    let split_writable_roots =
-        file_system_sandbox_policy.get_writable_roots_with_cwd(sandbox_policy_cwd);
-    let legacy_root_paths: BTreeSet<PathBuf> = legacy_writable_roots
-        .iter()
-        .map(|root| normalize_windows_override_path(root.root.as_path()))
-        .collect::<std::result::Result<_, _>>()?;
-    let split_root_paths: BTreeSet<PathBuf> = split_writable_roots
-        .iter()
-        .map(|root| normalize_windows_override_path(root.root.as_path()))
-        .collect::<std::result::Result<_, _>>()?;
+        let legacy_projection = compatibility_sandbox_policy_for_permission_profile(
+            permission_profile,
+            sandbox_policy_cwd.as_path(),
+        );
+        let legacy_writable_roots =
+            legacy_projection.get_writable_roots_with_cwd(sandbox_policy_cwd);
+        let split_writable_roots =
+            file_system_sandbox_policy.get_writable_roots_with_cwd(sandbox_policy_cwd);
+        let legacy_root_paths: BTreeSet<PathBuf> = legacy_writable_roots
+            .iter()
+            .map(|root| normalize_windows_override_path(root.root.as_path()))
+            .collect::<std::result::Result<_, _>>()?;
+        let split_root_paths: BTreeSet<PathBuf> = split_writable_roots
+            .iter()
+            .map(|root| normalize_windows_override_path(root.root.as_path()))
+            .collect::<std::result::Result<_, _>>()?;
 
-    if legacy_root_paths != split_root_paths {
-        return Err(
+        if legacy_root_paths != split_root_paths {
+            return Err(
             "windows unelevated restricted-token sandbox cannot enforce split writable root sets directly; refusing to run unsandboxed"
                 .to_string(),
         );
-    }
+        }
 
-    for writable_root in &split_writable_roots {
-        for read_only_subpath in &writable_root.read_only_subpaths {
-            if split_writable_roots.iter().any(|candidate| {
-                candidate.root.as_path() != writable_root.root.as_path()
-                    && candidate
-                        .root
-                        .as_path()
-                        .starts_with(read_only_subpath.as_path())
-            }) {
-                return Err(
+        for writable_root in &split_writable_roots {
+            for read_only_subpath in &writable_root.read_only_subpaths {
+                if split_writable_roots.iter().any(|candidate| {
+                    candidate.root.as_path() != writable_root.root.as_path()
+                        && candidate
+                            .root
+                            .as_path()
+                            .starts_with(read_only_subpath.as_path())
+                }) {
+                    return Err(
                     "windows unelevated restricted-token sandbox cannot reopen writable descendants under read-only carveouts directly; refusing to run unsandboxed"
                         .to_string(),
                 );
+                }
             }
         }
-    }
 
-    let mut additional_deny_write_paths = BTreeSet::new();
-    for split_root in &split_writable_roots {
-        let split_root_path = normalize_windows_override_path(split_root.root.as_path())?;
-        let Some(legacy_root) = legacy_writable_roots.iter().find(|candidate| {
-            normalize_windows_override_path(candidate.root.as_path())
-                .is_ok_and(|candidate_path| candidate_path == split_root_path)
-        }) else {
-            return Err(
+        let mut additional_deny_write_paths = BTreeSet::new();
+        for split_root in &split_writable_roots {
+            let split_root_path = normalize_windows_override_path(split_root.root.as_path())?;
+            let Some(legacy_root) = legacy_writable_roots.iter().find(|candidate| {
+                normalize_windows_override_path(candidate.root.as_path())
+                    .is_ok_and(|candidate_path| candidate_path == split_root_path)
+            }) else {
+                return Err(
                 "windows unelevated restricted-token sandbox cannot enforce split writable root sets directly; refusing to run unsandboxed"
                     .to_string(),
             );
-        };
+            };
 
-        for read_only_subpath in &split_root.read_only_subpaths {
-            if !legacy_root
-                .read_only_subpaths
-                .iter()
-                .any(|candidate| candidate == read_only_subpath)
-            {
-                additional_deny_write_paths.insert(normalize_windows_override_path(
-                    read_only_subpath.as_path(),
-                )?);
+            for read_only_subpath in &split_root.read_only_subpaths {
+                if !legacy_root
+                    .read_only_subpaths
+                    .iter()
+                    .any(|candidate| candidate == read_only_subpath)
+                {
+                    additional_deny_write_paths.insert(normalize_windows_override_path(
+                        read_only_subpath.as_path(),
+                    )?);
+                }
             }
         }
-    }
 
-    if additional_deny_read_paths.is_empty() && additional_deny_write_paths.is_empty() {
-        return Ok(None);
-    }
+        if additional_deny_read_paths.is_empty() && additional_deny_write_paths.is_empty() {
+            return Ok(None);
+        }
 
-    Ok(Some(WindowsSandboxFilesystemOverrides {
-        read_roots_override: None,
-        read_roots_include_platform_defaults: false,
-        write_roots_override: None,
-        additional_deny_read_paths,
-        additional_deny_write_paths: additional_deny_write_paths
-            .into_iter()
-            .map(|path| AbsolutePathBuf::from_absolute_path(path).map_err(|err| err.to_string()))
-            .collect::<std::result::Result<_, _>>()?,
-    }))
+        Ok(Some(WindowsSandboxFilesystemOverrides {
+            read_roots_override: None,
+            read_roots_include_platform_defaults: false,
+            write_roots_override: None,
+            additional_deny_read_paths,
+            additional_deny_write_paths: additional_deny_write_paths
+                .into_iter()
+                .map(|path| {
+                    AbsolutePathBuf::from_absolute_path(path).map_err(|err| err.to_string())
+                })
+                .collect::<std::result::Result<_, _>>()?,
+        }))
+    }
 }
 
 fn normalize_windows_override_path(path: &Path) -> std::result::Result<PathBuf, String> {
@@ -1193,127 +1393,144 @@ pub(crate) fn resolve_windows_elevated_filesystem_overrides(
     sandbox_policy_cwd: &AbsolutePathBuf,
     use_windows_elevated_backend: bool,
 ) -> std::result::Result<Option<WindowsSandboxFilesystemOverrides>, String> {
-    if sandbox != SandboxType::WindowsRestrictedToken || !use_windows_elevated_backend {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (
+            sandbox,
+            permission_profile,
+            sandbox_policy_cwd,
+            use_windows_elevated_backend,
+        );
         return Ok(None);
     }
 
-    let (file_system_sandbox_policy, network_sandbox_policy) =
-        permission_profile.to_runtime_permissions();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if sandbox != SandboxType::WindowsRestrictedToken || !use_windows_elevated_backend {
+            return Ok(None);
+        }
 
-    if !permission_profile_supports_windows_restricted_token_sandbox(permission_profile) {
-        let permission_profile_name = permission_profile_display_name(permission_profile);
-        return Err(format!(
-            "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, permission_profile={permission_profile_name}; refusing to run unsandboxed",
-            file_system_sandbox_policy.kind,
-        ));
-    }
+        let (file_system_sandbox_policy, network_sandbox_policy) =
+            permission_profile.to_runtime_permissions();
 
-    let additional_deny_read_paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
-        &file_system_sandbox_policy,
-        sandbox_policy_cwd,
-    )?;
+        if !permission_profile_supports_windows_restricted_token_sandbox(permission_profile) {
+            let permission_profile_name = permission_profile_display_name(permission_profile);
+            return Err(format!(
+                "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, permission_profile={permission_profile_name}; refusing to run unsandboxed",
+                file_system_sandbox_policy.kind,
+            ));
+        }
 
-    let split_writable_roots =
-        file_system_sandbox_policy.get_writable_roots_with_cwd(sandbox_policy_cwd);
-    if has_reopened_writable_descendant(&split_writable_roots) {
-        return Err(
+        let additional_deny_read_paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
+            &file_system_sandbox_policy,
+            sandbox_policy_cwd,
+        )?;
+
+        let split_writable_roots =
+            file_system_sandbox_policy.get_writable_roots_with_cwd(sandbox_policy_cwd);
+        if has_reopened_writable_descendant(&split_writable_roots) {
+            return Err(
             "windows elevated sandbox cannot reopen writable descendants under read-only carveouts directly; refusing to run unsandboxed"
                 .to_string(),
         );
-    }
+        }
 
-    let needs_direct_runtime_enforcement = file_system_sandbox_policy
-        .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd);
-    let normalize_path = |path: PathBuf| dunce::canonicalize(&path).unwrap_or(path);
-    let legacy_projection = compatibility_sandbox_policy_for_permission_profile(
-        permission_profile,
-        sandbox_policy_cwd.as_path(),
-    );
-    let legacy_writable_roots = legacy_projection.get_writable_roots_with_cwd(sandbox_policy_cwd);
-    let legacy_root_paths: BTreeSet<PathBuf> = legacy_writable_roots
-        .iter()
-        .map(|root| normalize_path(root.root.to_path_buf()))
-        .collect();
-    let split_readable_roots: Vec<PathBuf> = file_system_sandbox_policy
-        .get_readable_roots_with_cwd(sandbox_policy_cwd)
-        .into_iter()
-        .map(codex_utils_absolute_path::AbsolutePathBuf::into_path_buf)
-        .map(&normalize_path)
-        .collect();
-    let split_root_paths: Vec<PathBuf> = split_writable_roots
-        .iter()
-        .map(|root| normalize_path(root.root.to_path_buf()))
-        .collect();
-    let split_root_path_set: BTreeSet<PathBuf> = split_root_paths.iter().cloned().collect();
+        let needs_direct_runtime_enforcement = file_system_sandbox_policy
+            .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd);
+        let normalize_path = |path: PathBuf| dunce::canonicalize(&path).unwrap_or(path);
+        let legacy_projection = compatibility_sandbox_policy_for_permission_profile(
+            permission_profile,
+            sandbox_policy_cwd.as_path(),
+        );
+        let legacy_writable_roots =
+            legacy_projection.get_writable_roots_with_cwd(sandbox_policy_cwd);
+        let legacy_root_paths: BTreeSet<PathBuf> = legacy_writable_roots
+            .iter()
+            .map(|root| normalize_path(root.root.to_path_buf()))
+            .collect();
+        let split_readable_roots: Vec<PathBuf> = file_system_sandbox_policy
+            .get_readable_roots_with_cwd(sandbox_policy_cwd)
+            .into_iter()
+            .map(codex_utils_absolute_path::AbsolutePathBuf::into_path_buf)
+            .map(&normalize_path)
+            .collect();
+        let split_root_paths: Vec<PathBuf> = split_writable_roots
+            .iter()
+            .map(|root| normalize_path(root.root.to_path_buf()))
+            .collect();
+        let split_root_path_set: BTreeSet<PathBuf> = split_root_paths.iter().cloned().collect();
 
-    // `has_full_disk_read_access()` is intentionally false when deny-read
-    // entries exist. For Windows setup overrides, the important question is
-    // whether the baseline still reads from the filesystem root and only needs
-    // additional deny ACLs layered on top.
-    let split_has_root_read_access =
-        windows_policy_has_root_read_access(&file_system_sandbox_policy, sandbox_policy_cwd);
-    let read_roots_override = if split_has_root_read_access {
-        None
-    } else {
-        Some(split_readable_roots)
-    };
+        // `has_full_disk_read_access()` is intentionally false when deny-read
+        // entries exist. For Windows setup overrides, the important question is
+        // whether the baseline still reads from the filesystem root and only needs
+        // additional deny ACLs layered on top.
+        let split_has_root_read_access =
+            windows_policy_has_root_read_access(&file_system_sandbox_policy, sandbox_policy_cwd);
+        let read_roots_override = if split_has_root_read_access {
+            None
+        } else {
+            Some(split_readable_roots)
+        };
 
-    let write_roots_override = if split_root_path_set == legacy_root_paths {
-        None
-    } else {
-        Some(split_root_paths)
-    };
+        let write_roots_override = if split_root_path_set == legacy_root_paths {
+            None
+        } else {
+            Some(split_root_paths)
+        };
 
-    let additional_deny_write_paths = if needs_direct_runtime_enforcement {
-        let mut deny_paths = BTreeSet::new();
-        for writable_root in &split_writable_roots {
-            let writable_root_path = normalize_path(writable_root.root.to_path_buf());
-            let legacy_root = legacy_writable_roots.iter().find(|candidate| {
-                normalize_path(candidate.root.to_path_buf()) == writable_root_path
-            });
-            for read_only_subpath in &writable_root.read_only_subpaths {
-                let read_only_subpath_suffix = read_only_subpath
-                    .as_path()
-                    .strip_prefix(writable_root.root.as_path())
-                    .ok();
-                let already_denied_by_legacy = legacy_root.is_some_and(|legacy_root| {
-                    legacy_root.read_only_subpaths.iter().any(|candidate| {
-                        candidate
-                            .as_path()
-                            .strip_prefix(legacy_root.root.as_path())
-                            .ok()
-                            == read_only_subpath_suffix
-                    })
+        let additional_deny_write_paths = if needs_direct_runtime_enforcement {
+            let mut deny_paths = BTreeSet::new();
+            for writable_root in &split_writable_roots {
+                let writable_root_path = normalize_path(writable_root.root.to_path_buf());
+                let legacy_root = legacy_writable_roots.iter().find(|candidate| {
+                    normalize_path(candidate.root.to_path_buf()) == writable_root_path
                 });
-                if !already_denied_by_legacy {
-                    deny_paths.insert(normalize_path(read_only_subpath.to_path_buf()));
+                for read_only_subpath in &writable_root.read_only_subpaths {
+                    let read_only_subpath_suffix = read_only_subpath
+                        .as_path()
+                        .strip_prefix(writable_root.root.as_path())
+                        .ok();
+                    let already_denied_by_legacy = legacy_root.is_some_and(|legacy_root| {
+                        legacy_root.read_only_subpaths.iter().any(|candidate| {
+                            candidate
+                                .as_path()
+                                .strip_prefix(legacy_root.root.as_path())
+                                .ok()
+                                == read_only_subpath_suffix
+                        })
+                    });
+                    if !already_denied_by_legacy {
+                        deny_paths.insert(normalize_path(read_only_subpath.to_path_buf()));
+                    }
                 }
             }
+            deny_paths
+                .into_iter()
+                .map(|path| {
+                    AbsolutePathBuf::from_absolute_path(path).map_err(|err| err.to_string())
+                })
+                .collect::<std::result::Result<_, _>>()?
+        } else {
+            Vec::new()
+        };
+
+        if read_roots_override.is_none()
+            && write_roots_override.is_none()
+            && additional_deny_read_paths.is_empty()
+            && additional_deny_write_paths.is_empty()
+        {
+            return Ok(None);
         }
-        deny_paths
-            .into_iter()
-            .map(|path| AbsolutePathBuf::from_absolute_path(path).map_err(|err| err.to_string()))
-            .collect::<std::result::Result<_, _>>()?
-    } else {
-        Vec::new()
-    };
 
-    if read_roots_override.is_none()
-        && write_roots_override.is_none()
-        && additional_deny_read_paths.is_empty()
-        && additional_deny_write_paths.is_empty()
-    {
-        return Ok(None);
+        Ok(Some(WindowsSandboxFilesystemOverrides {
+            read_roots_include_platform_defaults: read_roots_override.is_some()
+                && file_system_sandbox_policy.include_platform_defaults(),
+            read_roots_override,
+            write_roots_override,
+            additional_deny_read_paths,
+            additional_deny_write_paths,
+        }))
     }
-
-    Ok(Some(WindowsSandboxFilesystemOverrides {
-        read_roots_include_platform_defaults: read_roots_override.is_some()
-            && file_system_sandbox_policy.include_platform_defaults(),
-        read_roots_override,
-        write_roots_override,
-        additional_deny_read_paths,
-        additional_deny_write_paths,
-    }))
 }
 
 fn permission_profile_display_name(permission_profile: &PermissionProfile) -> &'static str {
@@ -1345,6 +1562,7 @@ fn has_reopened_writable_descendant(
 
 /// Consumes the output of a child process according to the configured capture
 /// policy.
+#[cfg(not(target_arch = "wasm32"))]
 async fn consume_output(
     mut child: Child,
     expiration: ExecExpiration,
@@ -1477,6 +1695,7 @@ async fn consume_output(
 
     Ok(RawExecToolCallOutput {
         exit_status,
+        exit_code_override: None,
         stdout,
         stderr,
         aggregated_output,
@@ -1484,6 +1703,19 @@ async fn consume_output(
     })
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn consume_output(
+    _child: Child,
+    _expiration: ExecExpiration,
+    _capture_policy: ExecCapturePolicy,
+    _stdout_stream: Option<StdoutStream>,
+) -> Result<RawExecToolCallOutput> {
+    Err(CodexErr::Io(io::Error::other(
+        "browser process execution requires an almostnode host process shim",
+    )))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
     mut reader: R,
     stream: Option<StdoutStream>,
@@ -1504,27 +1736,7 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
             break;
         }
 
-        if let Some(stream) = &stream
-            && emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
-        {
-            let chunk = tmp[..n].to_vec();
-            let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
-                call_id: stream.call_id.clone(),
-                stream: if is_stderr {
-                    ExecOutputStream::Stderr
-                } else {
-                    ExecOutputStream::Stdout
-                },
-                chunk,
-            });
-            let event = Event {
-                id: stream.sub_id.clone(),
-                msg,
-            };
-            #[allow(clippy::let_unit_value)]
-            let _ = stream.tx_event.send(event).await;
-            emitted_deltas += 1;
-        }
+        emit_exec_output_delta(&stream, &tmp[..n], is_stderr, &mut emitted_deltas).await;
 
         if let Some(max_bytes) = max_bytes {
             append_capped(&mut buf, &tmp[..n], max_bytes);
@@ -1538,6 +1750,34 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
         text: buf,
         truncated_after_lines: None,
     })
+}
+
+async fn emit_exec_output_delta(
+    stream: &Option<StdoutStream>,
+    chunk: &[u8],
+    is_stderr: bool,
+    emitted_deltas: &mut usize,
+) {
+    if let Some(stream) = stream
+        && *emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
+    {
+        let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+            call_id: stream.call_id.clone(),
+            stream: if is_stderr {
+                ExecOutputStream::Stderr
+            } else {
+                ExecOutputStream::Stdout
+            },
+            chunk: chunk.to_vec(),
+        });
+        let event = Event {
+            id: stream.sub_id.clone(),
+            msg,
+        };
+        #[allow(clippy::let_unit_value)]
+        let _ = stream.tx_event.send(event).await;
+        *emitted_deltas += 1;
+    }
 }
 
 #[cfg(unix)]
@@ -1561,6 +1801,16 @@ fn synthetic_exit_status(code: i32) -> ExitStatus {
 }
 
 #[cfg(windows)]
+fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
+    synthetic_exit_status(code)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn synthetic_exit_status(_code: i32) -> ExitStatus {
+    ExitStatus::default()
+}
+
+#[cfg(target_arch = "wasm32")]
 fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
     synthetic_exit_status(code)
 }

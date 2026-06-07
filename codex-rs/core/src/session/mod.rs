@@ -6,8 +6,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
@@ -37,10 +35,13 @@ use crate::realtime_conversation::RealtimeConversationManager;
 use crate::session_prefix::format_subagent_notification_message;
 use crate::skills::SkillRenderSideEffects;
 use crate::skills_load_input_from_config;
+use crate::time::SystemTime;
+use crate::time::UNIX_EPOCH;
 use crate::turn_metadata::TurnMetadataState;
 use crate::turn_timing::now_unix_timestamp_ms;
 use async_channel::Receiver;
 use async_channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use chrono::Local;
 use chrono::Utc;
 use codex_analytics::AnalyticsEventsClient;
@@ -142,7 +143,10 @@ use codex_thread_store::ResumeThreadParams;
 use codex_thread_store::ThreadPersistenceMetadata;
 use codex_thread_store::ThreadStore;
 use codex_utils_output_truncation::TruncationPolicy;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use futures::future::Shared;
 use futures::prelude::*;
 use rmcp::model::ElicitationCapability;
@@ -159,6 +163,7 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use toml::Value as TomlValue;
@@ -656,17 +661,23 @@ impl Codex {
 
         // This task will run until Op::Shutdown is received.
         let session_for_loop = Arc::clone(&session);
-        let session_loop_handle = tokio::spawn(async move {
+        let session_loop_future = async move {
             submission_loop(session_for_loop, config, rx_sub)
                 .instrument(info_span!("session_loop", thread_id = %thread_id))
                 .await;
-        });
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let session_loop_termination =
+            session_loop_termination_from_handle(tokio::spawn(session_loop_future));
+        #[cfg(target_arch = "wasm32")]
+        let session_loop_termination =
+            session_loop_termination_from_local_future(session_loop_future);
         let codex = Codex {
             tx_sub,
             rx_event,
             agent_status: agent_status_rx,
             session,
-            session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
+            session_loop_termination,
         };
 
         Ok(CodexSpawnOk { codex, thread_id })
@@ -848,9 +859,17 @@ fn session_permission_profile_state_from_config(
 
 #[cfg(test)]
 pub(crate) fn completed_session_loop_termination() -> SessionLoopTermination {
-    futures::future::ready(()).boxed().shared()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        futures::future::ready(()).boxed().shared()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        futures::future::ready(()).boxed_local().shared()
+    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn session_loop_termination_from_handle(
     handle: JoinHandle<()>,
 ) -> SessionLoopTermination {
@@ -858,6 +877,22 @@ pub(crate) fn session_loop_termination_from_handle(
         let _ = handle.await;
     }
     .boxed()
+    .shared()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn session_loop_termination_from_local_future(
+    future: impl std::future::Future<Output = ()> + 'static,
+) -> SessionLoopTermination {
+    let (tx_done, rx_done) = oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        future.await;
+        let _ = tx_done.send(());
+    });
+    async move {
+        let _ = rx_done.await;
+    }
+    .boxed_local()
     .shared()
 }
 

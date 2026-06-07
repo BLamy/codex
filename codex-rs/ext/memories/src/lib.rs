@@ -1,5 +1,6 @@
 mod backend;
 mod extension;
+mod fs;
 mod local;
 mod metrics;
 mod prompts;

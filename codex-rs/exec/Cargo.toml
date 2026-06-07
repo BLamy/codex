@@ -44,13 +44,6 @@ owo-colors = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 supports-color = { workspace = true }
-tokio = { workspace = true, features = [
-    "io-std",
-    "macros",
-    "process",
-    "rt-multi-thread",
-    "signal",
-] }
 tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ts-rs = { workspace = true, features = [
@@ -59,6 +52,18 @@ ts-rs = { workspace = true, features = [
     "no-serde-warnings",
 ] }
 uuid = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 
 
 [dev-dependencies]

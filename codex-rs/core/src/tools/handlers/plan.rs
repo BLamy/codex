@@ -45,7 +45,8 @@ impl ToolOutput for PlanToolOutput {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for PlanHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("update_plan")

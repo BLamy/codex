@@ -13,7 +13,10 @@
 //! final source-backed reflow after the stream becomes source-backed history.
 
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 pub(crate) const TRANSCRIPT_REFLOW_DEBOUNCE: Duration = Duration::from_millis(75);
 

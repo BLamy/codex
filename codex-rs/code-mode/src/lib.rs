@@ -1,7 +1,13 @@
 mod description;
 mod response;
+#[cfg(not(target_arch = "wasm32"))]
 mod runtime;
+#[cfg(target_arch = "wasm32")]
+mod runtime_wasm;
+#[cfg(not(target_arch = "wasm32"))]
 mod service;
+#[cfg(target_arch = "wasm32")]
+mod service_wasm;
 
 pub use description::CODE_MODE_PRAGMA_PREFIX;
 pub use description::CodeModeToolKind;
@@ -18,29 +24,98 @@ pub use description::render_json_schema_to_typescript;
 pub use response::DEFAULT_IMAGE_DETAIL;
 pub use response::FunctionCallOutputContentItem;
 pub use response::ImageDetail;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::CodeModeNestedToolCall;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::DEFAULT_EXEC_YIELD_TIME_MS;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::DEFAULT_WAIT_YIELD_TIME_MS;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::ExecuteRequest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::ExecuteToPendingOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::RuntimeResponse;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::WaitOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::WaitRequest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::WaitToPendingOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::WaitToPendingRequest;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::CodeModeNestedToolCall;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::DEFAULT_EXEC_YIELD_TIME_MS;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::DEFAULT_WAIT_YIELD_TIME_MS;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::ExecuteRequest;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::ExecuteToPendingOutcome;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::RuntimeResponse;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::WaitOutcome;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::WaitRequest;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::WaitToPendingOutcome;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_wasm::WaitToPendingRequest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CellId;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeService;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeSession;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeSessionDelegate;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeSessionProvider;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeSessionProviderFuture;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::CodeModeSessionResultFuture;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::InProcessCodeModeSessionProvider;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::NoopCodeModeSessionDelegate;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::NotificationFuture;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::StartedCell;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::ToolInvocationFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CellId;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeService;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSession;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionDelegate;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionProvider;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionProviderFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionResultFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::InProcessCodeModeSessionProvider;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::NoopCodeModeSessionDelegate;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::NotificationFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::StartedCell;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::ToolInvocationFuture;
 
 pub const PUBLIC_TOOL_NAME: &str = "exec";
 pub const WAIT_TOOL_NAME: &str = "wait";

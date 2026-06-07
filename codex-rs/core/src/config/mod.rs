@@ -1192,7 +1192,15 @@ impl ConfigBuilder {
         let loader_overrides = loader_overrides.unwrap_or_default();
         let cwd_override = harness_overrides.cwd.as_deref().or(fallback_cwd.as_deref());
         let cwd = match cwd_override {
+            #[cfg(target_arch = "wasm32")]
+            Some(path) => AbsolutePathBuf::from_absolute_path_checked(
+                AbsolutePathBuf::resolve_path_against_base(path, Path::new("/")).as_path(),
+            )?,
+            #[cfg(not(target_arch = "wasm32"))]
             Some(path) => AbsolutePathBuf::relative_to_current_dir(path)?,
+            #[cfg(target_arch = "wasm32")]
+            None => AbsolutePathBuf::from_absolute_path_checked(Path::new("/"))?,
+            #[cfg(not(target_arch = "wasm32"))]
             None => AbsolutePathBuf::current_dir()?,
         };
         harness_overrides.cwd = Some(cwd.to_path_buf());
@@ -2716,20 +2724,38 @@ impl Config {
         };
         let windows_sandbox_private_desktop = resolve_windows_sandbox_private_desktop(&cfg);
         let resolved_cwd = AbsolutePathBuf::try_from(normalize_for_native_workdir({
-            use std::env;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                use std::env;
 
-            match cwd {
-                None => {
-                    tracing::info!("cwd not set, using current dir");
-                    env::current_dir()?
+                match cwd {
+                    None => {
+                        tracing::info!("cwd not set, using current dir");
+                        env::current_dir()?
+                    }
+                    Some(p) if p.is_absolute() => p,
+                    Some(p) => {
+                        // Resolve relative path against the current working directory.
+                        tracing::info!("cwd is relative, resolving against current dir");
+                        let mut current = env::current_dir()?;
+                        current.push(p);
+                        current
+                    }
                 }
-                Some(p) if p.is_absolute() => p,
-                Some(p) => {
-                    // Resolve relative path against the current working directory.
-                    tracing::info!("cwd is relative, resolving against current dir");
-                    let mut current = env::current_dir()?;
-                    current.push(p);
-                    current
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                match cwd {
+                    None => {
+                        tracing::info!("cwd not set, using browser root");
+                        PathBuf::from("/")
+                    }
+                    Some(p) if p.is_absolute() => p,
+                    Some(p) => {
+                        tracing::info!("cwd is relative, resolving against browser root");
+                        PathBuf::from("/").join(p)
+                    }
                 }
             }
         }))?;

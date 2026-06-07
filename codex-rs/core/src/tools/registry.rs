@@ -32,7 +32,10 @@ use codex_protocol::protocol::EventMsg;
 use codex_tools::ToolName;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use serde_json::Value;
 use tracing::warn;
 
@@ -251,7 +254,8 @@ struct ExposureOverride {
     exposure: ToolExposure,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for ExposureOverride {
     fn tool_name(&self) -> ToolName {
         self.handler.tool_name()

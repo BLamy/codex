@@ -143,7 +143,12 @@ async fn resolve_requested_rollout_path(
     } else {
         rollout_path
     };
-    match tokio::fs::metadata(path.as_path()).await {
+    #[cfg(not(target_arch = "wasm32"))]
+    let path_metadata = tokio::fs::metadata(path.as_path()).await;
+    #[cfg(target_arch = "wasm32")]
+    let path_metadata = std::fs::metadata(path.as_path());
+
+    match path_metadata {
         Ok(metadata) if metadata.is_dir() => {
             return Err(ThreadStoreError::InvalidRequest {
                 message: format!(

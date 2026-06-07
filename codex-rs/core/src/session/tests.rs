@@ -1934,7 +1934,8 @@ async fn record_token_usage_info_notifies_extension_contributors() {
         records: Arc<std::sync::Mutex<Vec<RecordedTokenUsage>>>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::TokenUsageContributor for TokenUsageRecorder {
         async fn on_token_usage(
             &self,
@@ -2052,7 +2053,8 @@ async fn turn_start_lifecycle_exposes_turn_metadata_and_token_baseline() {
         records: Arc<std::sync::Mutex<Vec<RecordedTurnStart>>>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::TurnLifecycleContributor for TurnStartRecorder {
         async fn on_turn_start(&self, input: codex_extension_api::TurnStartInput<'_>) {
             self.records
@@ -2150,7 +2152,8 @@ async fn turn_error_lifecycle_exposes_error_and_stores() {
         records: Arc<std::sync::Mutex<Vec<RecordedTurnError>>>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::TurnLifecycleContributor for TurnErrorRecorder {
         async fn on_turn_error(&self, input: codex_extension_api::TurnErrorInput<'_>) {
             self.records
@@ -6409,7 +6412,8 @@ async fn submission_loop_channel_close_emits_thread_stop_lifecycle() {
         expected_thread_id: ThreadId,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ThreadLifecycleContributor<crate::config::Config> for ThreadStopRecorder {
         async fn on_thread_stop(&self, input: codex_extension_api::ThreadStopInput<'_>) {
             assert_eq!(
@@ -6455,7 +6459,8 @@ async fn submission_loop_channel_close_aborts_active_turn_before_thread_stop_lif
         expected_turn_id: String,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ThreadLifecycleContributor<crate::config::Config> for LifecycleRecorder {
         async fn on_thread_stop(&self, input: codex_extension_api::ThreadStopInput<'_>) {
             assert_eq!(
@@ -6469,7 +6474,8 @@ async fn submission_loop_channel_close_aborts_active_turn_before_thread_stop_lif
         }
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::TurnLifecycleContributor for LifecycleRecorder {
         async fn on_turn_abort(&self, input: codex_extension_api::TurnAbortInput<'_>) {
             assert_eq!(
@@ -8759,7 +8765,8 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
         expected_thread_id: ThreadId,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ThreadLifecycleContributor<crate::config::Config> for ThreadIdleRecorder {
         async fn on_thread_idle(&self, input: codex_extension_api::ThreadIdleInput<'_>) {
             assert_eq!(
@@ -8801,7 +8808,8 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
         calls: Arc<std::sync::atomic::AtomicUsize>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ThreadLifecycleContributor<crate::config::Config> for ThreadIdleRecorder {
         async fn on_thread_idle(&self, _input: codex_extension_api::ThreadIdleInput<'_>) {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

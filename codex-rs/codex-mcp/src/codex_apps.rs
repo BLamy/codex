@@ -6,7 +6,10 @@
 //! connector/tool metadata into model-visible MCP callable names.
 
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::runtime::emit_duration;

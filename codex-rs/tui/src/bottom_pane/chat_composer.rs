@@ -254,7 +254,10 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use ratatui::style::Color;
 

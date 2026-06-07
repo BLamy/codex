@@ -13,6 +13,7 @@ use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::openai_models::ModelsResponse;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
 use crate::auth::auth_manager_for_provider;
 use crate::auth::resolve_provider_auth;
@@ -149,9 +150,19 @@ pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> SharedModelProvider {
+    #[cfg(not(target_arch = "wasm32"))]
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info))
     } else {
+        Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        if provider_info.is_amazon_bedrock() {
+            tracing::warn!(
+                "Amazon Bedrock provider requested in wasm32; AWS SDK auth is not available"
+            );
+        }
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }
 }

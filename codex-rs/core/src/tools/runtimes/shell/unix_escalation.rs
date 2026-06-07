@@ -601,7 +601,8 @@ impl CoreShellActionProvider {
 // execve interception.
 const ENABLE_INTERCEPTED_EXEC_POLICY_SHELL_WRAPPER_PARSING: bool = false;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl EscalationPolicy for CoreShellActionProvider {
     async fn determine_action(
         &self,
@@ -793,7 +794,8 @@ struct PrepareSandboxedExecParams<'a> {
     additional_permissions: Option<AdditionalPermissionProfile>,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ShellCommandExecutor for CoreShellCommandExecutor {
     async fn run(
         &self,

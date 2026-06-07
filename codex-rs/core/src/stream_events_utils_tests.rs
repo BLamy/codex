@@ -167,7 +167,8 @@ struct TestTurnItemContributor;
 #[derive(Debug)]
 struct TurnItemContributorRan;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl TurnItemContributor for TestTurnItemContributor {
     async fn contribute(
         &self,
@@ -188,7 +189,8 @@ impl TurnItemContributor for TestTurnItemContributor {
 
 struct RewriteAgentMessageContributor;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl TurnItemContributor for RewriteAgentMessageContributor {
     async fn contribute(
         &self,

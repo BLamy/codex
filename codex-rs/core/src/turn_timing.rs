@@ -1,7 +1,4 @@
 use std::time::Duration;
-use std::time::Instant;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use codex_otel::TURN_TTFM_DURATION_METRIC;
 use codex_protocol::items::TurnItem;
@@ -11,6 +8,9 @@ use tokio::sync::Mutex;
 use crate::ResponseEvent;
 use crate::session::turn_context::TurnContext;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
+use crate::time::Instant;
+use crate::time::SystemTime;
+use crate::time::UNIX_EPOCH;
 
 pub(crate) async fn record_turn_ttft_metric(turn_context: &TurnContext, event: &ResponseEvent) {
     let Some(duration) = turn_context

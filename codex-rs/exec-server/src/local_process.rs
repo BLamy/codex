@@ -768,17 +768,14 @@ mod tests {
         process.exit(/*exit_code*/ 0);
         let exit_response =
             read_process_until_change(&backend, &process.process_id, /*after_seq*/ None).await;
-        assert_eq!(
-            exit_response,
-            ReadResponse {
-                chunks: Vec::new(),
-                next_seq: 2,
-                exited: true,
-                exit_code: Some(0),
-                closed: false,
-                failure: None,
-            }
-        );
+        assert_eq!(exit_response, ReadResponse {
+            chunks: Vec::new(),
+            next_seq: 2,
+            exited: true,
+            exit_code: Some(0),
+            closed: false,
+            failure: None,
+        });
 
         tokio::time::sleep(EXITED_PROCESS_RETENTION + Duration::from_millis(10)).await;
         process
@@ -789,14 +786,11 @@ mod tests {
 
         let late_response =
             read_process_until_change(&backend, &process.process_id, /*after_seq*/ Some(1)).await;
-        assert_eq!(
-            late_response.chunks,
-            vec![ProcessOutputChunk {
-                seq: 2,
-                stream: ExecOutputStream::Stdout,
-                chunk: b"late output after retention\n".to_vec().into(),
-            }]
-        );
+        assert_eq!(late_response.chunks, vec![ProcessOutputChunk {
+            seq: 2,
+            stream: ExecOutputStream::Stdout,
+            chunk: b"late output after retention\n".to_vec().into(),
+        }]);
         assert_eq!(late_response.exit_code, Some(0));
         assert!(!late_response.closed);
 

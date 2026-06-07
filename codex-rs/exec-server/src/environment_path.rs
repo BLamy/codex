@@ -10,8 +10,11 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use crate::ExecutorFileSystem;
 use crate::FileMetadata;
 use crate::FileSystemSandboxContext;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::LOCAL_FS;
 use crate::ReadDirectoryEntry;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostFileSystem;
 
 /// Binds an absolute path to the executor filesystem that owns it.
 #[derive(Clone)]
@@ -28,7 +31,15 @@ impl EnvironmentPathRef {
 
     /// Creates a path ref bound to the shared unsandboxed local filesystem.
     pub fn local(path: AbsolutePathBuf) -> Self {
-        Self::new(Arc::clone(&LOCAL_FS), path)
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Self::new(Arc::new(WasmHostFileSystem::default()), path);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::new(Arc::clone(&LOCAL_FS), path)
+        }
     }
 
     /// Returns the absolute path held by this ref.
@@ -357,26 +368,23 @@ mod tests {
                 is_file: true,
             }]
         );
-        assert_eq!(
-            file_system.recorded_calls(),
-            vec![
-                RecordedCall {
-                    method: RecordedMethod::ReadFileText,
-                    path: path.clone(),
-                    sandbox: Some(sandbox.clone()),
-                },
-                RecordedCall {
-                    method: RecordedMethod::Metadata,
-                    path: path.clone(),
-                    sandbox: Some(sandbox.clone()),
-                },
-                RecordedCall {
-                    method: RecordedMethod::ReadDirectory,
-                    path,
-                    sandbox: Some(sandbox),
-                },
-            ]
-        );
+        assert_eq!(file_system.recorded_calls(), vec![
+            RecordedCall {
+                method: RecordedMethod::ReadFileText,
+                path: path.clone(),
+                sandbox: Some(sandbox.clone()),
+            },
+            RecordedCall {
+                method: RecordedMethod::Metadata,
+                path: path.clone(),
+                sandbox: Some(sandbox.clone()),
+            },
+            RecordedCall {
+                method: RecordedMethod::ReadDirectory,
+                path,
+                sandbox: Some(sandbox),
+            },
+        ]);
     }
 
     #[test]
@@ -415,14 +423,11 @@ mod tests {
             canonicalized,
             EnvironmentPathRef::new(file_system.clone(), path.parent().unwrap())
         );
-        assert_eq!(
-            file_system.recorded_calls(),
-            vec![RecordedCall {
-                method: RecordedMethod::Canonicalize,
-                path,
-                sandbox: None,
-            }]
-        );
+        assert_eq!(file_system.recorded_calls(), vec![RecordedCall {
+            method: RecordedMethod::Canonicalize,
+            path,
+            sandbox: None,
+        }]);
     }
 
     #[tokio::test]
@@ -438,14 +443,11 @@ mod tests {
                 std::env::temp_dir().join("skills/demo").abs(),
             ))
         );
-        assert_eq!(
-            file_system.recorded_calls(),
-            vec![RecordedCall {
-                method: RecordedMethod::Join,
-                path,
-                sandbox: None,
-            }]
-        );
+        assert_eq!(file_system.recorded_calls(), vec![RecordedCall {
+            method: RecordedMethod::Join,
+            path,
+            sandbox: None,
+        }]);
     }
 
     #[tokio::test]
@@ -490,14 +492,11 @@ mod tests {
                 std::env::temp_dir().join("skills").abs(),
             ))
         );
-        assert_eq!(
-            file_system.recorded_calls(),
-            vec![RecordedCall {
-                method: RecordedMethod::Parent,
-                path,
-                sandbox: None,
-            }]
-        );
+        assert_eq!(file_system.recorded_calls(), vec![RecordedCall {
+            method: RecordedMethod::Parent,
+            path,
+            sandbox: None,
+        }]);
     }
 
     #[cfg(windows)]

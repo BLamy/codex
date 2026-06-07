@@ -334,13 +334,10 @@ impl ExecServerClient {
             let response: InitializeResponse = self
                 .inner
                 .client
-                .call(
-                    INITIALIZE_METHOD,
-                    &InitializeParams {
-                        client_name,
-                        resume_session_id,
-                    },
-                )
+                .call(INITIALIZE_METHOD, &InitializeParams {
+                    client_name,
+                    resume_session_id,
+                })
                 .await?;
             {
                 let mut session_id = self
@@ -372,13 +369,10 @@ impl ExecServerClient {
         process_id: &ProcessId,
         chunk: Vec<u8>,
     ) -> Result<WriteResponse, ExecServerError> {
-        self.call(
-            EXEC_WRITE_METHOD,
-            &WriteParams {
-                process_id: process_id.clone(),
-                chunk: chunk.into(),
-            },
-        )
+        self.call(EXEC_WRITE_METHOD, &WriteParams {
+            process_id: process_id.clone(),
+            chunk: chunk.into(),
+        })
         .await
     }
 
@@ -386,12 +380,9 @@ impl ExecServerClient {
         &self,
         process_id: &ProcessId,
     ) -> Result<TerminateResponse, ExecServerError> {
-        self.call(
-            EXEC_TERMINATE_METHOD,
-            &TerminateParams {
-                process_id: process_id.clone(),
-            },
-        )
+        self.call(EXEC_TERMINATE_METHOD, &TerminateParams {
+            process_id: process_id.clone(),
+        })
         .await
     }
 
@@ -1406,26 +1397,23 @@ mod tests {
             );
         }
 
-        assert_eq!(
-            delivered,
-            vec![
-                ExecProcessEvent::Output(ProcessOutputChunk {
-                    seq: 1,
-                    stream: ExecOutputStream::Stdout,
-                    chunk: b"one".to_vec().into(),
-                }),
-                ExecProcessEvent::Output(ProcessOutputChunk {
-                    seq: 2,
-                    stream: ExecOutputStream::Stderr,
-                    chunk: b"two".to_vec().into(),
-                }),
-                ExecProcessEvent::Exited {
-                    seq: 3,
-                    exit_code: 0,
-                },
-                ExecProcessEvent::Closed { seq: 4 },
-            ]
-        );
+        assert_eq!(delivered, vec![
+            ExecProcessEvent::Output(ProcessOutputChunk {
+                seq: 1,
+                stream: ExecOutputStream::Stdout,
+                chunk: b"one".to_vec().into(),
+            }),
+            ExecProcessEvent::Output(ProcessOutputChunk {
+                seq: 2,
+                stream: ExecOutputStream::Stderr,
+                chunk: b"two".to_vec().into(),
+            }),
+            ExecProcessEvent::Exited {
+                seq: 3,
+                exit_code: 0,
+            },
+            ExecProcessEvent::Closed { seq: 4 },
+        ]);
 
         drop(notifications_tx);
         drop(client);

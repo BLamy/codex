@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::mcp_tool_call::handle_mcp_tool_call;
@@ -23,6 +23,10 @@ use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSearchSourceInfo;
 use codex_tools::ToolSpec;
 use codex_tools::mcp_tool_to_responses_api_tool;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -64,7 +68,8 @@ fn ensure_mcp_prefix(name: &str) -> String {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for McpHandler {
     fn tool_name(&self) -> ToolName {
         self.tool_info.canonical_tool_name()
@@ -160,7 +165,7 @@ impl CoreToolRuntime for McpHandler {
     fn telemetry_tags<'a>(
         &'a self,
         _invocation: &'a ToolInvocation,
-    ) -> futures::future::BoxFuture<'a, ToolTelemetryTags> {
+    ) -> BoxFuture<'a, ToolTelemetryTags> {
         Box::pin(async {
             let mut tags = vec![("mcp_server", self.tool_info.server_name.clone())];
             if let Some(origin) = &self.tool_info.server_origin {

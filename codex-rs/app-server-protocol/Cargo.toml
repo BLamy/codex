@@ -17,7 +17,6 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-experimental-api-macros = { workspace = true }
 codex-protocol = { workspace = true }
-codex-shell-command = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -25,16 +24,22 @@ serde_json = { workspace = true }
 serde_with = { workspace = true }
 strum_macros = { workspace = true }
 thiserror = { workspace = true }
+ts-rs = { workspace = true }
+inventory = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v7"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+codex-shell-command = { workspace = true }
 rmcp = { workspace = true, default-features = false, features = [
     "base64",
     "macros",
     "schemars",
     "server",
 ] }
-ts-rs = { workspace = true }
-inventory = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }

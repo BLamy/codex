@@ -4,7 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::apply_patch;
 use crate::apply_patch::InternalApplyPatchInvocation;
@@ -305,7 +305,8 @@ async fn effective_patch_permissions(
     )
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for ApplyPatchHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("apply_patch")

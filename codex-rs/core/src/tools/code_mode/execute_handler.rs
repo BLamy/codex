@@ -5,6 +5,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use crate::time::Instant;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
@@ -38,7 +39,7 @@ impl CodeModeExecuteHandler {
         let exec = ExecContext { session, turn };
         let enabled_tools =
             codex_tools::collect_code_mode_tool_definitions(&self.nested_tool_specs);
-        let started_at = std::time::Instant::now();
+        let started_at = Instant::now();
         let started_cell = exec
             .session
             .services
@@ -91,7 +92,8 @@ impl CodeModeExecuteHandler {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(PUBLIC_TOOL_NAME)

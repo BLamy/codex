@@ -22,8 +22,14 @@
 use std::future::Future;
 use std::sync::OnceLock;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;

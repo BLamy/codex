@@ -22,7 +22,7 @@ mod imp {
     use std::os::fd::AsRawFd;
     use std::os::fd::FromRawFd;
     use std::time::Duration;
-    use std::time::Instant;
+    use crate::time::Instant;
 
     use crossterm::event::KeyboardEnhancementFlags;
     use ratatui::layout::Position;

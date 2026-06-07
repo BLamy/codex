@@ -52,8 +52,15 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+#[cfg(target_arch = "wasm32")]
+use std::task::Context as TaskContext;
+#[cfg(target_arch = "wasm32")]
+use std::task::Poll;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+#[cfg(target_arch = "wasm32")]
+use tokio::sync::oneshot;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::JoinHandle as RealtimeTaskHandle;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -73,6 +80,53 @@ const REALTIME_V2_STEER_ACKNOWLEDGEMENT: &str =
     "This was sent to steer the previous background agent task.";
 const REALTIME_ACTIVE_RESPONSE_ERROR_PREFIX: &str =
     "Conversation already has an active response in progress:";
+
+#[cfg(target_arch = "wasm32")]
+struct RealtimeTaskHandle {
+    rx: oneshot::Receiver<()>,
+    aborted: Arc<AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RealtimeTaskHandle {
+    fn abort(&self) {
+        self.aborted.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl std::future::Future for RealtimeTaskHandle {
+    type Output = Result<(), ()>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        if self.aborted.load(Ordering::Acquire) {
+            return Poll::Ready(Err(()));
+        }
+        match std::pin::Pin::new(&mut self.rx).poll(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(())),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_realtime_task(
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> RealtimeTaskHandle {
+    tokio::spawn(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_realtime_task(future: impl std::future::Future<Output = ()> + 'static) -> RealtimeTaskHandle {
+    let (tx, rx) = oneshot::channel();
+    let aborted = Arc::new(AtomicBool::new(false));
+    wasm_bindgen_futures::spawn_local(async move {
+        future.await;
+        let _ = tx.send(());
+    });
+    RealtimeTaskHandle { rx, aborted }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RealtimeConversationEnd {
@@ -219,8 +273,8 @@ struct ConversationState {
     user_text_tx: Sender<String>,
     session_kind: RealtimeSessionKind,
     handoff: RealtimeHandoffState,
-    input_task: JoinHandle<()>,
-    fanout_task: Option<JoinHandle<()>>,
+    input_task: RealtimeTaskHandle,
+    fanout_task: Option<RealtimeTaskHandle>,
     realtime_active: Arc<AtomicBool>,
 }
 
@@ -371,7 +425,7 @@ impl RealtimeConversationManager {
     pub(crate) async fn register_fanout_task(
         &self,
         realtime_active: &Arc<AtomicBool>,
-        fanout_task: JoinHandle<()>,
+        fanout_task: RealtimeTaskHandle,
     ) {
         let mut fanout_task = Some(fanout_task);
         {
@@ -822,7 +876,7 @@ async fn handle_start_inner(
     let sess_clone = Arc::clone(sess);
     let sub_id = sub_id.to_string();
     let fanout_realtime_active = Arc::clone(&realtime_active);
-    let fanout_task = tokio::spawn(async move {
+    let fanout_task = spawn_realtime_task(async move {
         let ev = |msg| Event {
             id: sub_id.clone(),
             msg,
@@ -1020,8 +1074,8 @@ pub(crate) async fn handle_close(sess: &Arc<Session>, sub_id: String) {
     end_realtime_conversation(sess, sub_id, RealtimeConversationEnd::Requested).await;
 }
 
-fn spawn_realtime_input_task(input: RealtimeInputTask) -> JoinHandle<()> {
-    tokio::spawn(run_realtime_input_task(input))
+fn spawn_realtime_input_task(input: RealtimeInputTask) -> RealtimeTaskHandle {
+    spawn_realtime_task(run_realtime_input_task(input))
 }
 
 struct RealtimeWebrtcSidebandInputTask {
@@ -1037,7 +1091,7 @@ struct RealtimeWebrtcSidebandInputTask {
     realtime_active: Arc<AtomicBool>,
 }
 
-fn spawn_webrtc_sideband_input_task(input: RealtimeWebrtcSidebandInputTask) -> JoinHandle<()> {
+fn spawn_webrtc_sideband_input_task(input: RealtimeWebrtcSidebandInputTask) -> RealtimeTaskHandle {
     let RealtimeWebrtcSidebandInputTask {
         client,
         session_config,
@@ -1051,7 +1105,7 @@ fn spawn_webrtc_sideband_input_task(input: RealtimeWebrtcSidebandInputTask) -> J
         realtime_active,
     } = input;
 
-    tokio::spawn(async move {
+    spawn_realtime_task(async move {
         if !realtime_active.load(Ordering::Relaxed) {
             return;
         }

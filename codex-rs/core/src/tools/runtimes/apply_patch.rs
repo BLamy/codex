@@ -33,9 +33,12 @@ use codex_sandboxing::SandboxType;
 use codex_sandboxing::SandboxablePreference;
 use codex_sandboxing::policy_transforms::effective_permission_profile;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use std::path::PathBuf;
-use std::time::Instant;
+use crate::time::Instant;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct ApplyPatchApprovalKey {

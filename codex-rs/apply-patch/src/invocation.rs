@@ -4,10 +4,15 @@ use std::sync::LazyLock;
 
 use codex_exec_server::ExecutorFileSystem;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::Query;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::QueryCursor;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::StreamingIterator;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter_bash::LANGUAGE as BASH;
 
 use crate::ApplyPatchAction;
@@ -22,6 +27,7 @@ use crate::parser::ParseError;
 use crate::parser::parse_patch;
 use crate::unified_diff_from_chunks;
 use std::str::Utf8Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tree_sitter::LanguageError;
 
 const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
@@ -44,6 +50,7 @@ pub enum MaybeApplyPatch {
 #[derive(Debug, PartialEq)]
 pub enum ExtractHeredocError {
     CommandDidNotStartWithApplyPatch,
+    #[cfg(not(target_arch = "wasm32"))]
     FailedToLoadBashGrammar(LanguageError),
     HeredocNotUtf8(Utf8Error),
     FailedToParsePatchIntoAst,
@@ -90,6 +97,7 @@ fn parse_shell_script(argv: &[String]) -> Option<(ApplyPatchShell, &str)> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_apply_patch_from_shell(
     shell: ApplyPatchShell,
     script: &str,
@@ -110,6 +118,9 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
         // Shell heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
+        #[cfg(target_arch = "wasm32")]
+        _ => MaybeApplyPatch::NotApplyPatch,
+        #[cfg(not(target_arch = "wasm32"))]
         _ => match parse_shell_script(argv) {
             Some((shell, script)) => match extract_apply_patch_from_shell(shell, script) {
                 Ok((body, workdir)) => match parse_patch(&body) {
@@ -252,6 +263,7 @@ pub async fn verify_apply_patch_args(
 /// Returns `(heredoc_body, Some(path))` when the `cd` variant matches, or
 /// `(heredoc_body, None)` for the direct form. Errors are returned if the script
 /// cannot be parsed or does not match the allowed patterns.
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_apply_patch_from_bash(
     src: &str,
 ) -> std::result::Result<(String, Option<String>), ExtractHeredocError> {

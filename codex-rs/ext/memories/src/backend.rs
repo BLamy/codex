@@ -9,6 +9,7 @@ use std::future::Future;
 /// their own storage-specific access rules. The local implementation uses the
 /// filesystem today; a later implementation can satisfy the same contract from a
 /// remote backend.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait MemoriesBackend: Clone + Send + Sync + 'static {
     fn add_ad_hoc_note(
         &self,
@@ -29,6 +30,29 @@ pub trait MemoriesBackend: Clone + Send + Sync + 'static {
         &self,
         request: SearchMemoriesRequest,
     ) -> impl Future<Output = Result<SearchMemoriesResponse, MemoriesBackendError>> + Send;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub trait MemoriesBackend: Clone + 'static {
+    fn add_ad_hoc_note(
+        &self,
+        request: AddAdHocMemoryNoteRequest,
+    ) -> impl Future<Output = Result<AddAdHocMemoryNoteResponse, MemoriesBackendError>>;
+
+    fn list(
+        &self,
+        request: ListMemoriesRequest,
+    ) -> impl Future<Output = Result<ListMemoriesResponse, MemoriesBackendError>>;
+
+    fn read(
+        &self,
+        request: ReadMemoryRequest,
+    ) -> impl Future<Output = Result<ReadMemoryResponse, MemoriesBackendError>>;
+
+    fn search(
+        &self,
+        request: SearchMemoriesRequest,
+    ) -> impl Future<Output = Result<SearchMemoriesResponse, MemoriesBackendError>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

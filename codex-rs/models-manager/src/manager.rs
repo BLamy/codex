@@ -29,7 +29,8 @@ const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 /// Implementations own provider-specific auth and transport details. The model
 /// manager owns refresh policy, cache behavior, and catalog merging; it calls
 /// this endpoint only when it decides a remote refresh should happen.
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
     /// Returns whether this provider can authenticate command-scoped requests.
     fn has_command_auth(&self) -> bool;
@@ -74,7 +75,8 @@ impl fmt::Display for RefreshStrategy {
 type SharedModelsEndpointClient = Arc<dyn ModelsEndpointClient>;
 
 /// Coordinates model discovery plus cached metadata on disk.
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// List all available models, refreshing according to the specified strategy.
     ///
@@ -224,7 +226,8 @@ impl StaticModelsManager {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ModelsManager for OpenAiModelsManager {
     async fn raw_model_catalog(&self, refresh_strategy: RefreshStrategy) -> ModelsResponse {
         if let Err(err) = self.refresh_available_models(refresh_strategy).await {
@@ -379,7 +382,8 @@ impl OpenAiModelsManager {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ModelsManager for StaticModelsManager {
     async fn raw_model_catalog(&self, _refresh_strategy: RefreshStrategy) -> ModelsResponse {
         ModelsResponse {

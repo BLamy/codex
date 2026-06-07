@@ -5,7 +5,10 @@
 //! these pieces on one line avoids vertical layout churn in the bottom pane.
 
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
@@ -307,7 +310,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use std::time::Duration;
-    use std::time::Instant;
+    use crate::time::Instant;
     use tokio::sync::mpsc::unbounded_channel;
 
     use pretty_assertions::assert_eq;

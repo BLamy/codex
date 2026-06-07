@@ -395,6 +395,10 @@ impl HistoryCell for AgentMarkdownCell {
     }
 }
 
+pub(crate) fn new_agent_message(markdown_source: String, cwd: &Path) -> AgentMarkdownCell {
+    AgentMarkdownCell::new(markdown_source, cwd)
+}
+
 /// Transient active-cell representation of the mutable tail of an agent stream.
 ///
 /// During streaming, lines that have not yet been committed to scrollback because they belong to

@@ -330,19 +330,16 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            mapped_errors,
-            vec![
-                (
-                    io::ErrorKind::BrokenPipe,
-                    "exec-server transport closed".to_string()
-                ),
-                (
-                    io::ErrorKind::BrokenPipe,
-                    "exec-server transport closed".to_string()
-                ),
-            ]
-        );
+        assert_eq!(mapped_errors, vec![
+            (
+                io::ErrorKind::BrokenPipe,
+                "exec-server transport closed".to_string()
+            ),
+            (
+                io::ErrorKind::BrokenPipe,
+                "exec-server transport closed".to_string()
+            ),
+        ]);
     }
 
     fn absolute_test_path(name: &str) -> AbsolutePathBuf {

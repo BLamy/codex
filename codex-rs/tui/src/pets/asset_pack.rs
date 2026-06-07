@@ -11,7 +11,6 @@
 //! built-in pet is safe to persist to config.
 
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -92,7 +91,16 @@ fn pack_dir(codex_home: &Path) -> PathBuf {
     codex_home.join(PET_PACK_DIR).join(PET_PACK_VERSION)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn download_bytes_with_limit(url: &str, _max_bytes: u64) -> Result<Vec<u8>> {
+    validate_download_url(url)?;
+    bail!("built-in pet downloads are unavailable in the browser TUI")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn download_bytes_with_limit(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
+    use std::io::Read;
+
     validate_download_url(url)?;
     let response = reqwest::blocking::Client::builder()
         .timeout(PET_DOWNLOAD_TIMEOUT)

@@ -40,8 +40,37 @@ impl ToolExposure {
 /// Implementations keep the model-visible spec tied to the executable runtime.
 /// Host crates can layer routing, hooks, telemetry, or other orchestration on
 /// top without reopening the spec/runtime split.
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg(not(target_arch = "wasm32"))]
 pub trait ToolExecutor<Invocation>: Send + Sync {
+    /// The concrete tool name handled by this runtime instance.
+    fn tool_name(&self) -> ToolName;
+
+    fn spec(&self) -> ToolSpec;
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Direct
+    }
+
+    fn search_info(&self) -> Option<ToolSearchInfo> {
+        let spec = self.spec();
+        ToolSearchInfo::from_tool_spec(&self.tool_name(), spec, /*source_info*/ None)
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        false
+    }
+
+    async fn handle(
+        &self,
+        invocation: Invocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError>;
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg(target_arch = "wasm32")]
+pub trait ToolExecutor<Invocation> {
     /// The concrete tool name handled by this runtime instance.
     fn tool_name(&self) -> ToolName;
 

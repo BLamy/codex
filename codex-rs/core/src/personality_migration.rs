@@ -7,10 +7,9 @@ use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ThreadSortKey;
 use codex_thread_store::ThreadStore;
+use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
 
 pub const PERSONALITY_MIGRATION_FILENAME: &str = ".personality_migration";
 
@@ -28,7 +27,7 @@ pub async fn maybe_migrate_personality(
     state_db: Option<StateDbHandle>,
 ) -> io::Result<PersonalityMigrationStatus> {
     let marker_path = codex_home.join(PERSONALITY_MIGRATION_FILENAME);
-    if tokio::fs::try_exists(&marker_path).await? {
+    if marker_path.exists() {
         return Ok(PersonalityMigrationStatus::SkippedMarker);
     }
 
@@ -102,9 +101,8 @@ async fn create_marker(marker_path: &Path) -> io::Result<()> {
         .create_new(true)
         .write(true)
         .open(marker_path)
-        .await
     {
-        Ok(mut file) => file.write_all(b"v1\n").await,
+        Ok(mut file) => std::io::Write::write_all(&mut file, b"v1\n"),
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(err),
     }

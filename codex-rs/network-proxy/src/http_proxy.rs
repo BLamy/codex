@@ -75,7 +75,10 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::net::TcpListener as StdTcpListener;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use tracing::error;
 use tracing::info;
 use tracing::warn;

@@ -6,7 +6,10 @@ use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::ptr;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use windows_sys::Win32::Foundation::BOOL;
 use windows_sys::Win32::Foundation::CloseHandle;

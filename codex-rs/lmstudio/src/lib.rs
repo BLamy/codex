@@ -31,7 +31,8 @@ pub async fn ensure_oss_ready(config: &Config) -> std::io::Result<()> {
         }
     }
 
-    // Load the model in the background
+    // Load the model in the background.
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::spawn({
         let client = lmstudio_client.clone();
         let model = model.to_string();
@@ -41,6 +42,12 @@ pub async fn ensure_oss_ready(config: &Config) -> std::io::Result<()> {
             }
         }
     });
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Err(e) = lmstudio_client.load_model(model).await {
+            tracing::warn!("Failed to load model {}: {}", model, e);
+        }
+    }
 
     Ok(())
 }

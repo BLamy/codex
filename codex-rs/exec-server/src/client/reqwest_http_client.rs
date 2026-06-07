@@ -197,16 +197,13 @@ impl ReqwestHttpRequestRunner {
         while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => {
-                    if !send_body_delta(
-                        &notifications,
-                        HttpRequestBodyDeltaNotification {
-                            request_id: request_id.clone(),
-                            seq,
-                            delta: bytes.to_vec().into(),
-                            done: false,
-                            error: None,
-                        },
-                    )
+                    if !send_body_delta(&notifications, HttpRequestBodyDeltaNotification {
+                        request_id: request_id.clone(),
+                        seq,
+                        delta: bytes.to_vec().into(),
+                        done: false,
+                        error: None,
+                    })
                     .await
                     {
                         return;
@@ -214,32 +211,26 @@ impl ReqwestHttpRequestRunner {
                     seq += 1;
                 }
                 Err(error) => {
-                    let _ = send_body_delta(
-                        &notifications,
-                        HttpRequestBodyDeltaNotification {
-                            request_id,
-                            seq,
-                            delta: Vec::new().into(),
-                            done: true,
-                            error: Some(error.to_string()),
-                        },
-                    )
+                    let _ = send_body_delta(&notifications, HttpRequestBodyDeltaNotification {
+                        request_id,
+                        seq,
+                        delta: Vec::new().into(),
+                        done: true,
+                        error: Some(error.to_string()),
+                    })
                     .await;
                     return;
                 }
             }
         }
 
-        let _ = send_body_delta(
-            &notifications,
-            HttpRequestBodyDeltaNotification {
-                request_id,
-                seq,
-                delta: Vec::new().into(),
-                done: true,
-                error: None,
-            },
-        )
+        let _ = send_body_delta(&notifications, HttpRequestBodyDeltaNotification {
+            request_id,
+            seq,
+            delta: Vec::new().into(),
+            done: true,
+            error: None,
+        })
         .await;
     }
 

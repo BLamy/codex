@@ -183,8 +183,11 @@ fn get_shell_path(
         return Some(default_shell_path);
     }
 
-    if let Ok(path) = which::which(binary_name) {
-        return Some(path);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(path) = which::which(binary_name) {
+            return Some(path);
+        }
     }
 
     for path in fallback_paths {

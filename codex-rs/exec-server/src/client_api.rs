@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture;
 
 use crate::ExecServerError;
 use crate::HttpRequestParams;
@@ -11,6 +14,11 @@ use crate::HttpResponseBodyStream;
 
 pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type HttpClientFuture<'a, T> = BoxFuture<'a, T>;
+#[cfg(target_arch = "wasm32")]
+pub type HttpClientFuture<'a, T> = LocalBoxFuture<'a, T>;
 
 /// Connection options for any exec-server client transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,11 +91,11 @@ pub trait HttpClient: Send + Sync {
     fn http_request(
         &self,
         params: HttpRequestParams,
-    ) -> BoxFuture<'_, Result<HttpRequestResponse, ExecServerError>>;
+    ) -> HttpClientFuture<'_, Result<HttpRequestResponse, ExecServerError>>;
 
     /// Perform an HTTP request and return a streamed body handle.
     fn http_request_stream(
         &self,
         params: HttpRequestParams,
-    ) -> BoxFuture<'_, Result<(HttpRequestResponse, HttpResponseBodyStream), ExecServerError>>;
+    ) -> HttpClientFuture<'_, Result<(HttpRequestResponse, HttpResponseBodyStream), ExecServerError>>;
 }

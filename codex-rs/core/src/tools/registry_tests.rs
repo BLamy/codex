@@ -5,7 +5,8 @@ struct TestHandler {
     tool_name: codex_tools::ToolName,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for TestHandler {
     fn tool_name(&self) -> codex_tools::ToolName {
         self.tool_name.clone()
@@ -38,7 +39,8 @@ struct LifecycleTestHandler {
     result: LifecycleTestResult,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for LifecycleTestHandler {
     fn tool_name(&self) -> codex_tools::ToolName {
         self.tool_name.clone()

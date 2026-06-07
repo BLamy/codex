@@ -25,7 +25,7 @@ use codex_tools::ToolSpec;
 use codex_tools::default_namespace_description;
 use codex_tools::dynamic_tool_to_responses_api_tool;
 use serde_json::Value;
-use std::time::Instant;
+use crate::time::Instant;
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -61,7 +61,8 @@ impl DynamicToolHandler {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
     fn tool_name(&self) -> ToolName {
         self.tool_name.clone()

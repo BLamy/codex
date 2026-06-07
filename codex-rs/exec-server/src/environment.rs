@@ -6,7 +6,9 @@ use crate::ExecServerError;
 use crate::ExecServerRuntimePaths;
 use crate::ExecutorFileSystem;
 use crate::HttpClient;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::LazyRemoteExecServerClient;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::http_client::ReqwestHttpClient;
 use crate::client_api::ExecServerTransportParams;
 use crate::environment_provider::DefaultEnvironmentProvider;
@@ -14,12 +16,23 @@ use crate::environment_provider::EnvironmentDefault;
 use crate::environment_provider::EnvironmentProvider;
 use crate::environment_provider::EnvironmentProviderSnapshot;
 use crate::environment_provider::normalize_exec_server_url;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::environment_toml::environment_provider_from_codex_home;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::local_file_system::LocalFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::local_process::LocalProcess;
 use crate::process::ExecBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::remote_file_system::RemoteFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::remote_process::RemoteProcess;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostFileSystem as LocalFileSystem;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostHttpClient as ReqwestHttpClient;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostProcess as LocalProcess;
 
 pub const CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
 
@@ -90,8 +103,17 @@ impl EnvironmentManager {
         codex_home: impl AsRef<std::path::Path>,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
     ) -> Result<Self, ExecServerError> {
-        let provider = environment_provider_from_codex_home(codex_home.as_ref())?;
-        Self::from_snapshot(provider.snapshot().await?, local_runtime_paths)
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = codex_home;
+            return Self::from_env(local_runtime_paths).await;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let provider = environment_provider_from_codex_home(codex_home.as_ref())?;
+            Self::from_snapshot(provider.snapshot().await?, local_runtime_paths)
+        }
     }
 
     /// Builds a manager from the legacy environment-variable provider without
@@ -252,29 +274,40 @@ impl EnvironmentManager {
         environment_id: String,
         exec_server_url: String,
     ) -> Result<(), ExecServerError> {
-        if environment_id.is_empty() {
-            return Err(ExecServerError::Protocol(
-                "environment id cannot be empty".to_string(),
-            ));
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = exec_server_url;
+            return Err(ExecServerError::Protocol(format!(
+                "remote exec-server environments are not available in browser wasm for `{environment_id}`"
+            )));
         }
-        let (exec_server_url, disabled) = normalize_exec_server_url(Some(exec_server_url));
-        if disabled {
-            return Err(ExecServerError::Protocol(
-                "remote environment cannot use disabled exec-server url".to_string(),
-            ));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if environment_id.is_empty() {
+                return Err(ExecServerError::Protocol(
+                    "environment id cannot be empty".to_string(),
+                ));
+            }
+            let (exec_server_url, disabled) = normalize_exec_server_url(Some(exec_server_url));
+            if disabled {
+                return Err(ExecServerError::Protocol(
+                    "remote environment cannot use disabled exec-server url".to_string(),
+                ));
+            }
+            let Some(exec_server_url) = exec_server_url else {
+                return Err(ExecServerError::Protocol(
+                    "remote environment requires an exec-server url".to_string(),
+                ));
+            };
+            let environment =
+                Environment::remote_inner(exec_server_url, self.local_runtime_paths.clone());
+            self.environments
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(environment_id, Arc::new(environment));
+            Ok(())
         }
-        let Some(exec_server_url) = exec_server_url else {
-            return Err(ExecServerError::Protocol(
-                "remote environment requires an exec-server url".to_string(),
-            ));
-        };
-        let environment =
-            Environment::remote_inner(exec_server_url, self.local_runtime_paths.clone());
-        self.environments
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(environment_id, Arc::new(environment));
-        Ok(())
     }
 }
 
@@ -295,13 +328,28 @@ pub struct Environment {
 impl Environment {
     /// Builds a test-only local environment without configured sandbox helper paths.
     pub fn default_for_tests() -> Self {
-        Self {
-            exec_server_url: None,
-            remote_transport: None,
-            exec_backend: Arc::new(LocalProcess::default()),
-            filesystem: Arc::new(LocalFileSystem::unsandboxed()),
-            http_client: Arc::new(ReqwestHttpClient),
-            local_runtime_paths: None,
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Self {
+                exec_server_url: None,
+                remote_transport: None,
+                exec_backend: Arc::new(LocalProcess::default()),
+                filesystem: Arc::new(LocalFileSystem::default()),
+                http_client: Arc::new(ReqwestHttpClient::default()),
+                local_runtime_paths: None,
+            };
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                exec_server_url: None,
+                remote_transport: None,
+                exec_backend: Arc::new(LocalProcess::default()),
+                filesystem: Arc::new(LocalFileSystem::unsandboxed()),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: None,
+            }
         }
     }
 }
@@ -342,7 +390,13 @@ impl Environment {
         }
 
         Ok(match exec_server_url {
+            #[cfg(not(target_arch = "wasm32"))]
             Some(exec_server_url) => Self::remote_inner(exec_server_url, local_runtime_paths),
+            #[cfg(target_arch = "wasm32")]
+            Some(_exec_server_url) => match local_runtime_paths {
+                Some(local_runtime_paths) => Self::local(local_runtime_paths),
+                None => Self::default_for_tests(),
+            },
             None => match local_runtime_paths {
                 Some(local_runtime_paths) => Self::local(local_runtime_paths),
                 None => Self::default_for_tests(),
@@ -351,18 +405,35 @@ impl Environment {
     }
 
     pub(crate) fn local(local_runtime_paths: ExecServerRuntimePaths) -> Self {
-        Self {
-            exec_server_url: None,
-            remote_transport: None,
-            exec_backend: Arc::new(LocalProcess::default()),
-            filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
-                local_runtime_paths.clone(),
-            )),
-            http_client: Arc::new(ReqwestHttpClient),
-            local_runtime_paths: Some(local_runtime_paths),
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = local_runtime_paths.clone();
+            return Self {
+                exec_server_url: None,
+                remote_transport: None,
+                exec_backend: Arc::new(LocalProcess::default()),
+                filesystem: Arc::new(LocalFileSystem::default()),
+                http_client: Arc::new(ReqwestHttpClient::default()),
+                local_runtime_paths: Some(local_runtime_paths),
+            };
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                exec_server_url: None,
+                remote_transport: None,
+                exec_backend: Arc::new(LocalProcess::default()),
+                filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
+                    local_runtime_paths.clone(),
+                )),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: Some(local_runtime_paths),
+            }
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_inner(
         exec_server_url: String,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
@@ -373,6 +444,7 @@ impl Environment {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_with_transport(
         remote_transport: ExecServerTransportParams,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
@@ -611,10 +683,10 @@ mod tests {
             .expect("manager");
 
         assert_eq!(manager.default_environment_id(), Some("devbox"));
-        assert_eq!(
-            manager.default_environment_ids(),
-            vec!["devbox".to_string(), LOCAL_ENVIRONMENT_ID.to_string()]
-        );
+        assert_eq!(manager.default_environment_ids(), vec![
+            "devbox".to_string(),
+            LOCAL_ENVIRONMENT_ID.to_string()
+        ]);
         assert!(manager.default_environment().expect("default").is_remote());
     }
 

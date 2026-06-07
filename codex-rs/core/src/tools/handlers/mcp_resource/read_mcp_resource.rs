@@ -1,4 +1,4 @@
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolInvocation;
@@ -26,7 +26,8 @@ use super::serialize_function_output;
 
 pub struct ReadMcpResourceHandler;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for ReadMcpResourceHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("read_mcp_resource")

@@ -14,7 +14,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::codex_apps::CachedCodexAppsToolsLoad;
 use crate::codex_apps::CodexAppsToolsCacheContext;
@@ -54,8 +57,11 @@ use codex_rmcp_client::ExecutorStdioServerLauncher;
 use codex_rmcp_client::LocalStdioServerLauncher;
 use codex_rmcp_client::RmcpClient;
 use codex_rmcp_client::StdioServerLauncher;
-use futures::future::BoxFuture;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::future::BoxFuture as MaybeSendBoxFuture;
 use futures::future::FutureExt;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as MaybeSendBoxFuture;
 use futures::future::Shared;
 use rmcp::model::ClientCapabilities;
 use rmcp::model::ElicitationCapability;
@@ -125,7 +131,8 @@ impl ManagedClient {
 
 #[derive(Clone)]
 pub(crate) struct AsyncManagedClient {
-    pub(crate) client: Shared<BoxFuture<'static, Result<ManagedClient, StartupOutcomeError>>>,
+    pub(crate) client:
+        Shared<MaybeSendBoxFuture<'static, Result<ManagedClient, StartupOutcomeError>>>,
     pub(crate) cached_tool_info_snapshot: Option<Vec<ToolInfo>>,
     pub(crate) cached_server_info: Option<McpServerInfo>,
     pub(crate) startup_complete: Arc<AtomicBool>,
@@ -215,10 +222,18 @@ impl AsyncManagedClient {
             startup_complete_for_fut.store(true, Ordering::Release);
             outcome
         };
+        #[cfg(not(target_arch = "wasm32"))]
         let client = fut.boxed().shared();
+        #[cfg(target_arch = "wasm32")]
+        let client = fut.boxed_local().shared();
         if cached_tool_info_snapshot.is_some() {
             let startup_task = client.clone();
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::spawn(async move {
+                let _ = startup_task.await;
+            });
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(async move {
                 let _ = startup_task.await;
             });
         }

@@ -44,7 +44,8 @@ impl codex_extension_api::ToolContributor for ExtensionEchoContributor {
 
 struct ExtensionEchoExecutor;
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ExtensionToolCall> for ExtensionEchoExecutor {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced("extension/", "echo")

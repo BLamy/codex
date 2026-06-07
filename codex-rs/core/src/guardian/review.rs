@@ -44,6 +44,16 @@ use super::review_session::GuardianReviewSessionOutcome;
 use super::review_session::GuardianReviewSessionParams;
 use super::review_session::build_guardian_review_session_config;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_guardian_review_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_guardian_review_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 const GUARDIAN_REJECTION_INSTRUCTIONS: &str = concat!(
     "The agent must not attempt to achieve the same outcome via workaround, ",
     "indirect execution, or policy circumvention. ",
@@ -229,10 +239,9 @@ async fn record_guardian_denial(session: &Arc<Session>, turn: &Arc<TurnContext>,
         )
         .await;
 
-    let runtime_handle = session.services.runtime_handle.clone();
     let session = Arc::clone(session);
     let turn_id = turn_id.to_string();
-    let _abort_task = runtime_handle.spawn(async move {
+    spawn_guardian_review_task(async move {
         session
             .abort_turn_if_active(&turn_id, TurnAbortReason::Interrupted)
             .await;
@@ -621,6 +630,7 @@ pub(crate) fn spawn_approval_request_review(
     cancel_token: CancellationToken,
 ) -> oneshot::Receiver<ReviewDecision> {
     let (tx, rx) = oneshot::channel();
+    #[cfg(not(target_arch = "wasm32"))]
     std::thread::spawn(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -638,6 +648,20 @@ pub(crate) fn spawn_approval_request_review(
             approval_request_source,
             cancel_token,
         ));
+        let _ = tx.send(decision);
+    });
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(async move {
+        let decision = review_approval_request_with_cancel(
+            &session,
+            &turn,
+            review_id,
+            request,
+            retry_reason,
+            approval_request_source,
+            cancel_token,
+        )
+        .await;
         let _ = tx.send(decision);
     });
     rx

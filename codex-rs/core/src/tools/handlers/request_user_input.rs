@@ -20,7 +20,8 @@ pub struct RequestUserInputHandler {
     pub available_modes: Vec<ModeKind>,
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for RequestUserInputHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME)

@@ -1,12 +1,24 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use std::task::Context;
+#[cfg(target_arch = "wasm32")]
+use std::task::Poll;
+use crate::time::Instant;
 
+#[cfg(target_arch = "wasm32")]
+use futures::Future;
+#[cfg(target_arch = "wasm32")]
+use std::pin::Pin;
 use tokio::sync::RwLock;
+#[cfg(target_arch = "wasm32")]
+use tokio::sync::oneshot;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinError;
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::instrument;
@@ -26,6 +38,80 @@ use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseInputItem;
+
+#[cfg(not(target_arch = "wasm32"))]
+type ToolTaskJoinError = JoinError;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct ToolTaskJoinError {
+    cancelled: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl ToolTaskJoinError {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct LocalToolTaskHandle<T> {
+    rx: oneshot::Receiver<T>,
+    finished: Arc<AtomicBool>,
+    aborted: Arc<AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T> LocalToolTaskHandle<T> {
+    fn spawn(future: impl Future<Output = T> + 'static) -> Self
+    where
+        T: 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_for_task = Arc::clone(&finished);
+        wasm_bindgen_futures::spawn_local(async move {
+            let output = future.await;
+            finished_for_task.store(true, Ordering::Release);
+            let _ = tx.send(output);
+        });
+        Self {
+            rx,
+            finished,
+            aborted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn abort(&self) {
+        self.aborted.store(true, Ordering::Release);
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T> Future for LocalToolTaskHandle<T> {
+    type Output = Result<T, ToolTaskJoinError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.aborted.load(Ordering::Acquire) {
+            return Poll::Ready(Err(ToolTaskJoinError { cancelled: true }));
+        }
+        match Pin::new(&mut self.rx).poll(cx) {
+            Poll::Ready(Ok(output)) => Poll::Ready(Ok(output)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(ToolTaskJoinError { cancelled: true })),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type ToolTaskHandle<T> = AbortOnDropHandle<T>;
+#[cfg(target_arch = "wasm32")]
+type ToolTaskHandle<T> = LocalToolTaskHandle<T>;
 
 #[derive(Clone)]
 pub(crate) struct ToolCallRuntime {
@@ -110,27 +196,32 @@ impl ToolCallRuntime {
         );
         let abort_dispatch_span = dispatch_span.clone();
 
-        let mut handle: AbortOnDropHandle<Result<AnyToolResult, FunctionCallError>> =
-            AbortOnDropHandle::new(tokio::spawn(async move {
-                let _guard = if supports_parallel {
-                    Either::Left(lock.read().await)
-                } else {
-                    Either::Right(lock.write().await)
-                };
+        let task_future = async move {
+            let _guard = if supports_parallel {
+                Either::Left(lock.read().await)
+            } else {
+                Either::Right(lock.write().await)
+            };
 
-                router
-                    .dispatch_tool_call_with_terminal_outcome(
-                        session,
-                        turn,
-                        invocation_cancellation_token,
-                        tracker,
-                        dispatch_call,
-                        source,
-                        dispatch_terminal_outcome_reached,
-                    )
-                    .instrument(dispatch_span.clone())
-                    .await
-            }));
+            router
+                .dispatch_tool_call_with_terminal_outcome(
+                    session,
+                    turn,
+                    invocation_cancellation_token,
+                    tracker,
+                    dispatch_call,
+                    source,
+                    dispatch_terminal_outcome_reached,
+                )
+                .instrument(dispatch_span.clone())
+                .await
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut handle: ToolTaskHandle<Result<AnyToolResult, FunctionCallError>> =
+            AbortOnDropHandle::new(tokio::spawn(task_future));
+        #[cfg(target_arch = "wasm32")]
+        let mut handle: ToolTaskHandle<Result<AnyToolResult, FunctionCallError>> =
+            LocalToolTaskHandle::spawn(task_future);
 
         async move {
             tokio::select! {
@@ -179,7 +270,7 @@ impl ToolCallRuntime {
 }
 
 impl ToolCallRuntime {
-    fn tool_task_join_error(err: JoinError) -> FunctionCallError {
+    fn tool_task_join_error(err: ToolTaskJoinError) -> FunctionCallError {
         FunctionCallError::Fatal(format!("tool task failed to receive: {err:?}"))
     }
 
@@ -257,7 +348,8 @@ mod tests {
         tool_name: codex_tools::ToolName,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl ToolExecutor<ToolInvocation> for ImmediateHandler {
         fn tool_name(&self) -> codex_tools::ToolName {
             self.tool_name.clone()
@@ -294,7 +386,8 @@ mod tests {
         allow_cleanup: Arc<Notify>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl ToolExecutor<ToolInvocation> for CancellationCleanupHandler {
         fn tool_name(&self) -> codex_tools::ToolName {
             self.tool_name.clone()

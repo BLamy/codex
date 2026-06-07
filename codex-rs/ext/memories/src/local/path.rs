@@ -7,7 +7,7 @@ use crate::backend::MemoriesBackendError;
 pub(super) async fn read_sorted_dir_paths(
     dir_path: &Path,
 ) -> Result<Vec<PathBuf>, MemoriesBackendError> {
-    let mut dir = match tokio::fs::read_dir(dir_path).await {
+    let mut dir = match crate::fs::read_dir(dir_path).await {
         Ok(dir) => dir,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(err.into()),

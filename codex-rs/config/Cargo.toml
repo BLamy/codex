@@ -19,7 +19,6 @@ codex-app-server-protocol = { workspace = true }
 codex-execpolicy = { workspace = true }
 codex-features = { workspace = true }
 codex-file-system = { workspace = true }
-codex-git-utils = { workspace = true }
 codex-model-provider-info = { workspace = true }
 codex-network-proxy = { workspace = true }
 codex-protocol = { workspace = true }
@@ -27,10 +26,8 @@ codex-utils-absolute-path = { workspace = true }
 codex-utils-path = { workspace = true }
 dunce = { workspace = true }
 futures = { workspace = true, features = ["alloc", "std"] }
-gethostname = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 multimap = { workspace = true }
-prost = "0.14.3"
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_ignored = { workspace = true }
@@ -38,15 +35,20 @@ serde_json = { workspace = true }
 serde_path_to_error = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
 toml = { workspace = true, features = ["preserve_order"] }
 toml_edit = { workspace = true }
-tonic = { workspace = true }
-tonic-prost = { workspace = true }
 tracing = { workspace = true }
 wildmatch = { workspace = true }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+codex-git-utils = { workspace = true }
+gethostname = { workspace = true }
+prost = "0.14.3"
+tokio = { workspace = true, features = ["fs", "rt"] }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+
+[target.'cfg(all(unix, not(target_arch = "wasm32")))'.dependencies]
 dns-lookup = { workspace = true }
 libc = { workspace = true }
 

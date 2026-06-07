@@ -48,7 +48,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 mod action_required_title;
 mod app_link_view;
@@ -1805,7 +1808,7 @@ mod tests {
     use ratatui::layout::Rect;
     use std::cell::Cell;
     use std::rc::Rc;
-    use std::time::Instant;
+    use crate::time::Instant;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn snapshot_buffer(buf: &Buffer) -> String {

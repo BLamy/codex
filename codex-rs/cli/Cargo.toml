@@ -17,9 +17,19 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+default = []
+real-tui-wasm = ["codex-tui/real-tui-wasm"]
+
 [dependencies]
-anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
+codex-protocol = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+codex-tui = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow = { workspace = true }
 clap_complete = { workspace = true }
 codex-app-server = { workspace = true }
 codex-app-server-daemon = { workspace = true }
@@ -46,7 +56,6 @@ codex-mcp-server = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-plugin = { workspace = true }
-codex-protocol = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
 codex-rmcp-client = { workspace = true }
 codex-rollout = { workspace = true }

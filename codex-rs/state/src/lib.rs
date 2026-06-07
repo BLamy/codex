@@ -4,76 +4,147 @@
 //! from JSONL rollouts and mirrors it into a local SQLite database. Backfill
 //! orchestration and rollout scanning live in `codex-core`.
 
+#[cfg(not(target_arch = "wasm32"))]
 mod audit;
+#[cfg(not(target_arch = "wasm32"))]
 mod extract;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod log_db;
+#[cfg(target_arch = "wasm32")]
+#[path = "log_db_wasm.rs"]
+pub mod log_db;
+#[cfg(not(target_arch = "wasm32"))]
 mod migrations;
+#[cfg(not(target_arch = "wasm32"))]
 mod model;
+#[cfg(not(target_arch = "wasm32"))]
 mod paths;
+#[cfg(not(target_arch = "wasm32"))]
 mod runtime;
+#[cfg(not(target_arch = "wasm32"))]
 mod telemetry;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::LogEntry;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::LogQuery;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::LogRow;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Phase2JobClaimOutcome;
 /// Preferred entrypoint: owns configuration and metrics.
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::StateRuntime;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use audit::ThreadStateAuditRow;
+#[cfg(not(target_arch = "wasm32"))]
 pub use audit::read_thread_state_audit_rows;
 /// Low-level storage engine: useful for focused tests.
 ///
 /// Most consumers should prefer [`StateRuntime`].
+#[cfg(not(target_arch = "wasm32"))]
 pub use extract::apply_rollout_item;
+#[cfg(not(target_arch = "wasm32"))]
 pub use extract::rollout_item_affects_thread_metadata;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJob;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobCreateParams;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobItem;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobItemCreateParams;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobItemStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobProgress;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::AgentJobStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Anchor;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::BackfillState;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::BackfillStats;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::BackfillStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::DirectionalThreadSpawnEdgeStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ExtractionOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::SortDirection;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::SortKey;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Stage1JobClaim;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Stage1JobClaimOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Stage1Output;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::Stage1StartupClaimParams;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ThreadGoal;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ThreadGoalStatus;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ThreadMetadata;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ThreadMetadataBuilder;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::ThreadsPage;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::GoalAccountingMode;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::GoalAccountingOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::GoalStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::GoalUpdate;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::MemoryStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::RemoteControlEnrollmentRecord;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::RuntimeDbPath;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::ThreadFilterOptions;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::goals_db_filename;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::goals_db_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::logs_db_filename;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::logs_db_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::memories_db_filename;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::memories_db_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::runtime_db_paths;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::sqlite_integrity_check;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::state_db_filename;
+#[cfg(not(target_arch = "wasm32"))]
 pub use runtime::state_db_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use telemetry::DbTelemetry;
+#[cfg(not(target_arch = "wasm32"))]
 pub use telemetry::DbTelemetryHandle;
+#[cfg(not(target_arch = "wasm32"))]
 pub use telemetry::install_process_db_telemetry;
+#[cfg(not(target_arch = "wasm32"))]
 pub use telemetry::record_backfill_gate;
+#[cfg(not(target_arch = "wasm32"))]
 pub use telemetry::record_fallback;
+#[cfg(target_arch = "wasm32")]
+pub use wasm::*;
 
 /// Environment variable for overriding the SQLite state database home directory.
 pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";

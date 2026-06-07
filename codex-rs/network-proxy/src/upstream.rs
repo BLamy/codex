@@ -22,7 +22,10 @@ use rama_net::http::RequestContext;
 use rama_tls_rustls::client::TlsConnectorDataBuilder;
 use rama_tls_rustls::client::TlsConnectorLayer;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use tracing::info;
 use tracing::warn;
 

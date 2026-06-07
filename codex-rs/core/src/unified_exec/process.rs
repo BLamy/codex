@@ -8,7 +8,8 @@ use tokio::sync::Notify;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::JoinHandle as OutputTaskHandle;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -31,6 +32,27 @@ use super::head_tail_buffer::HeadTailBuffer;
 use super::process_state::ProcessState;
 
 const EARLY_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(150);
+
+#[cfg(target_arch = "wasm32")]
+struct OutputTaskHandle;
+
+#[cfg(target_arch = "wasm32")]
+impl OutputTaskHandle {
+    fn abort(&self) {}
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_process_task(
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> OutputTaskHandle {
+    tokio::spawn(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_process_task(future: impl std::future::Future<Output = ()> + 'static) -> OutputTaskHandle {
+    wasm_bindgen_futures::spawn_local(future);
+    OutputTaskHandle
+}
 
 pub(crate) trait SpawnLifecycle: std::fmt::Debug + Send + Sync {
     /// Returns file descriptors that must stay open across the child `exec()`.
@@ -82,7 +104,7 @@ pub(crate) struct UnifiedExecProcess {
     output_drained: Arc<Notify>,
     state_tx: watch::Sender<ProcessState>,
     state_rx: watch::Receiver<ProcessState>,
-    output_task: Option<JoinHandle<()>>,
+    output_task: Option<OutputTaskHandle>,
     sandbox_type: SandboxType,
     _spawn_lifecycle: Option<SpawnLifecycleHandle>,
 }
@@ -201,7 +223,7 @@ impl UnifiedExecProcess {
             ProcessHandle::Local(process_handle) => process_handle.terminate(),
             ProcessHandle::ExecServer(process_handle) => {
                 let process_handle = Arc::clone(process_handle);
-                tokio::spawn(async move {
+                spawn_process_task(async move {
                     let _ = process_handle.terminate().await;
                 });
             }
@@ -326,7 +348,7 @@ impl UnifiedExecProcess {
             return Ok(managed);
         }
 
-        tokio::spawn({
+        spawn_process_task({
             let state_tx = managed.state_tx.clone();
             let cancellation_token = managed.cancellation_token.clone();
             async move {
@@ -380,7 +402,7 @@ impl UnifiedExecProcess {
         output_handles: OutputHandles,
         output_tx: broadcast::Sender<Vec<u8>>,
         state_tx: watch::Sender<ProcessState>,
-    ) -> JoinHandle<()> {
+    ) -> OutputTaskHandle {
         let OutputHandles {
             output_buffer,
             output_notify,
@@ -390,7 +412,7 @@ impl UnifiedExecProcess {
         } = output_handles;
         let process = started.process;
         let mut wake_rx = process.subscribe_wake();
-        tokio::spawn(async move {
+        spawn_process_task(async move {
             let mut after_seq = None;
             loop {
                 match process
@@ -471,8 +493,8 @@ impl UnifiedExecProcess {
         output_closed: Arc<AtomicBool>,
         output_closed_notify: Arc<Notify>,
         output_tx: broadcast::Sender<Vec<u8>>,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> OutputTaskHandle {
+        spawn_process_task(async move {
             loop {
                 match receiver.recv().await {
                     Ok(chunk) => {

@@ -39,13 +39,17 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::validate_thread_goal_objective;
 use codex_rollout::state_db::reconcile_rollout;
 use codex_thread_store::LocalThreadStore;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::future::BoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as BoxFuture;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 use tokio::sync::SemaphorePermit;
+
+use crate::time::Instant;
 
 pub(crate) struct SetGoalRequest {
     pub(crate) objective: Option<String>,

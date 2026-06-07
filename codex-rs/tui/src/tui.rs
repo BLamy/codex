@@ -379,7 +379,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
     let startup_probe = {
         use crate::terminal_probe::StartupKeyboardEnhancementProbe;
 
-        let started_at = std::time::Instant::now();
+        let started_at = Instant::now();
         let keyboard_probe = if keyboard_modes::keyboard_enhancement_disabled() {
             StartupKeyboardEnhancementProbe::Skip
         } else {

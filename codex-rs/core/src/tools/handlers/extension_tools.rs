@@ -30,7 +30,8 @@ impl ExtensionToolAdapter {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
     fn tool_name(&self) -> ToolName {
         self.0.tool_name()
@@ -162,7 +163,8 @@ mod tests {
 
     struct StubExtensionExecutor;
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ToolExecutor<codex_tools::ToolCall> for StubExtensionExecutor {
         fn tool_name(&self) -> codex_tools::ToolName {
             codex_tools::ToolName::plain("extension_echo")
@@ -201,7 +203,8 @@ mod tests {
         captured_call: Arc<Mutex<Option<codex_tools::ToolCall>>>,
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ToolExecutor<codex_tools::ToolCall> for CapturingExtensionExecutor {
         fn tool_name(&self) -> codex_tools::ToolName {
             codex_tools::ToolName::plain("extension_echo")
@@ -388,7 +391,8 @@ mod tests {
 
     struct RecordExtensionTurnItemContributor;
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl TurnItemContributor for RecordExtensionTurnItemContributor {
         async fn contribute(
             &self,
@@ -431,7 +435,8 @@ mod tests {
         );
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl codex_extension_api::ToolExecutor<codex_tools::ToolCall> for ImageGenerationExtensionExecutor {
         fn tool_name(&self) -> codex_tools::ToolName {
             codex_tools::ToolName::namespaced("image_gen", "imagegen")

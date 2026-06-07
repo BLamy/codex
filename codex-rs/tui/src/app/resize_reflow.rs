@@ -16,7 +16,10 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use codex_features::Feature;
 use color_eyre::eyre::Result;

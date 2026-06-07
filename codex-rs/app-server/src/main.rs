@@ -1,21 +1,39 @@
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server::AppServerRuntimeOptions;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server::AppServerTransport;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server::AppServerWebsocketAuthArgs;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server::PluginStartupTasks;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server::run_main_with_transport_options;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_arg0::Arg0DispatchPaths;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_arg0::arg0_dispatch_or_else;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_config::LoaderOverrides;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_protocol::protocol::SessionSource;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_cli::CliConfigOverrides;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 // Debug-only test hook: lets integration tests point the server at a temporary
 // managed config file without writing to /etc.
+#[cfg(not(target_arch = "wasm32"))]
 const MANAGED_CONFIG_PATH_ENV_VAR: &str = "CODEX_APP_SERVER_MANAGED_CONFIG_PATH";
+#[cfg(not(target_arch = "wasm32"))]
 const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 #[command(version)]
 struct AppServerArgs {
@@ -58,6 +76,7 @@ struct AppServerArgs {
     remote_control: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> anyhow::Result<()> {
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let AppServerArgs {
@@ -102,6 +121,7 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn disable_managed_config_from_debug_env() -> bool {
     #[cfg(debug_assertions)]
     {
@@ -113,6 +133,7 @@ fn disable_managed_config_from_debug_env() -> bool {
     false
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn managed_config_path_from_debug_env() -> Option<PathBuf> {
     #[cfg(debug_assertions)]
     {
@@ -128,6 +149,6 @@ fn managed_config_path_from_debug_env() -> Option<PathBuf> {
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "main_tests.rs"]
 mod tests;

@@ -161,7 +161,8 @@ impl ExecProcessEventReceiver {
 /// `read` is the request/response API for callers that want to page through
 /// buffered output, while `subscribe_events` is the streaming API for callers
 /// that want output and lifecycle changes delivered as they happen.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ExecProcess: Send + Sync {
     fn process_id(&self) -> &ProcessId;
 
@@ -181,7 +182,8 @@ pub trait ExecProcess: Send + Sync {
     async fn terminate(&self) -> Result<(), ExecServerError>;
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ExecBackend: Send + Sync {
     async fn start(&self, params: ExecParams) -> Result<StartedExecProcess, ExecServerError>;
 }
@@ -224,15 +226,12 @@ mod tests {
                 .expect("closed event replay should be available"),
         ];
 
-        assert_eq!(
-            replay,
-            vec![
-                ExecProcessEvent::Exited {
-                    seq: 2,
-                    exit_code: 0,
-                },
-                ExecProcessEvent::Closed { seq: 3 },
-            ]
-        );
+        assert_eq!(replay, vec![
+            ExecProcessEvent::Exited {
+                seq: 2,
+                exit_code: 0,
+            },
+            ExecProcessEvent::Closed { seq: 3 },
+        ]);
     }
 }

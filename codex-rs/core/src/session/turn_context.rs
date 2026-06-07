@@ -393,6 +393,15 @@ impl TurnContext {
 }
 
 fn local_time_context() -> (String, String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return (
+            Utc::now().format("%Y-%m-%d").to_string(),
+            "Etc/UTC".to_string(),
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     match iana_time_zone::get_timezone() {
         Ok(timezone) => (Local::now().format("%Y-%m-%d").to_string(), timezone),
         Err(_) => (
@@ -590,11 +599,15 @@ impl Session {
         sub_id: String,
         updates: SessionSettingsUpdate,
     ) -> CodexResult<Arc<TurnContext>> {
+        crate::wasm_trace::stage("turn/new: begin");
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
+        crate::wasm_trace::stage("turn/new: checked config contributors");
         let update_result: CodexResult<_> = {
             let mut state = self.state.lock().await;
+            crate::wasm_trace::stage("turn/new: locked state");
             match state.session_configuration.clone().apply(&updates) {
                 Ok(next) => {
+                    crate::wasm_trace::stage("turn/new: applied session updates");
                     let mut effective_environments = updates
                         .environments
                         .clone()
@@ -605,8 +618,10 @@ impl Session {
                             &next.cwd,
                         );
                     }
+                    crate::wasm_trace::stage("turn/new: resolving environments");
                     let turn_environments =
                         self.resolve_turn_environments(&effective_environments)?;
+                    crate::wasm_trace::stage("turn/new: resolved environments");
                     let previous_cwd = state.session_configuration.cwd.clone();
                     let previous_permission_profile =
                         state.session_configuration.permission_profile();
@@ -618,9 +633,12 @@ impl Session {
                     let previous_config = notify_config_contributors.then(|| {
                         Self::build_effective_session_config(&state.session_configuration)
                     });
+                    crate::wasm_trace::stage("turn/new: built previous config");
                     let new_config = notify_config_contributors
                         .then(|| Self::build_effective_session_config(&next));
+                    crate::wasm_trace::stage("turn/new: built new config");
                     state.session_configuration = next.clone();
+                    crate::wasm_trace::stage("turn/new: stored session config");
                     Ok((
                         next,
                         turn_environments,
@@ -661,19 +679,24 @@ impl Session {
             }
         };
 
+        crate::wasm_trace::stage("turn/new: emitting config contributors");
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
+        crate::wasm_trace::stage("turn/new: maybe refreshing shell snapshot");
         self.maybe_refresh_shell_snapshot_for_cwd(
             &previous_cwd,
             &session_configuration.cwd,
             &codex_home,
             &session_source,
         );
+        crate::wasm_trace::stage("turn/new: checked shell snapshot");
 
         if permission_profile_changed {
+            crate::wasm_trace::stage("turn/new: refreshing managed network proxy");
             self.refresh_managed_network_proxy_for_current_permission_profile()
                 .await;
         }
 
+        crate::wasm_trace::stage("turn/new: entering turn configuration");
         Ok(self
             .new_turn_from_configuration(
                 sub_id,
@@ -735,18 +758,21 @@ impl Session {
         turn_environments: ResolvedTurnEnvironments,
         multi_agent_runtime: TurnMultiAgentRuntime,
     ) -> Arc<TurnContext> {
+        crate::wasm_trace::stage("turn/context: begin");
         let primary_turn_environment = turn_environments.primary().cloned();
         let cwd = primary_turn_environment
             .as_ref()
             .map(|turn_environment| turn_environment.cwd.clone())
             .unwrap_or_else(|| session_configuration.cwd.clone());
         let per_turn_config = Self::build_per_turn_config(&session_configuration, cwd.clone());
+        crate::wasm_trace::stage("turn/context: built per-turn config");
         {
             let mcp_connection_manager = self.services.mcp_connection_manager.read().await;
             mcp_connection_manager.set_approval_policy(&session_configuration.approval_policy);
             mcp_connection_manager
                 .set_permission_profile(session_configuration.permission_profile());
         }
+        crate::wasm_trace::stage("turn/context: set mcp policy");
 
         let model_info = self
             .services
@@ -756,6 +782,7 @@ impl Session {
                 &per_turn_config.to_models_manager_config(),
             )
             .await;
+        crate::wasm_trace::stage("turn/context: loaded model info");
 
         let multi_agent_version = match multi_agent_runtime {
             TurnMultiAgentRuntime::ResolveAndStore => {
@@ -766,11 +793,13 @@ impl Session {
                 .or(model_info.multi_agent_version)
                 .unwrap_or_else(|| per_turn_config.multi_agent_version_from_features()),
         };
+        crate::wasm_trace::stage("turn/context: resolved multi-agent version");
         let plugin_outcome = self
             .services
             .plugins_manager
             .plugins_for_config(&per_turn_config.plugins_config_input())
             .await;
+        crate::wasm_trace::stage("turn/context: loaded plugins");
         let effective_skill_roots = plugin_outcome.effective_plugin_skill_roots();
         let skills_input = skills_load_input_from_config(&per_turn_config, effective_skill_roots);
         let fs = primary_turn_environment
@@ -781,6 +810,7 @@ impl Session {
                 .skills_for_config(&skills_input, fs)
                 .await,
         );
+        crate::wasm_trace::stage("turn/context: loaded skills");
         let goal_tools_supported = !per_turn_config.ephemeral && self.state_db().is_some();
         let mut turn_context: TurnContext = Self::make_turn_context(
             self.thread_id(),
@@ -812,12 +842,15 @@ impl Session {
             skills_outcome,
             goal_tools_supported,
         );
+        crate::wasm_trace::stage("turn/context: made turn context");
         turn_context.realtime_active = self.conversation.running_state().await.is_some();
+        crate::wasm_trace::stage("turn/context: checked realtime state");
 
         if let Some(final_schema) = final_output_json_schema {
             turn_context.final_output_json_schema = final_schema;
         }
         let turn_context = Arc::new(turn_context);
+        crate::wasm_trace::stage("turn/context: arc wrapped");
         if turn_context
             .environments
             .single_local_environment_cwd()
@@ -825,6 +858,7 @@ impl Session {
         {
             turn_context.turn_metadata_state.spawn_git_enrichment_task();
         }
+        crate::wasm_trace::stage("turn/context: done");
         turn_context
     }
 

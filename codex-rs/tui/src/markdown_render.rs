@@ -52,6 +52,7 @@ use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 use crate::wrapping::word_wrap_line;
 use codex_utils_string::normalize_markdown_hash_location_suffix;
+#[cfg(not(target_arch = "wasm32"))]
 use dirs::home_dir;
 use pulldown_cmark::Alignment;
 use pulldown_cmark::CodeBlockKind;
@@ -75,6 +76,11 @@ use std::sync::LazyLock;
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 use url::Url;
+
+#[cfg(target_arch = "wasm32")]
+fn home_dir() -> Option<PathBuf> {
+    None
+}
 
 mod table_key_value;
 
@@ -2100,6 +2106,7 @@ fn expand_local_link_path(path_text: &str) -> String {
 /// encodings, we reconstruct a display path from the host/path parts so UNC paths and drive-letter
 /// URLs still render sensibly.
 fn file_url_to_local_path_text(url: &Url) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
     if let Ok(path) = url.to_file_path() {
         return Some(normalize_local_link_path_text(&path.to_string_lossy()));
     }
