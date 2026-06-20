@@ -119,6 +119,7 @@ pub struct BrowserTuiRunResult {
     pub ansi: String,
     pub action: BrowserTuiAction,
     pub cursor: Option<BrowserTuiCursorPosition>,
+    pub scrollback_ansi: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +190,7 @@ pub struct BrowserInteractiveTuiSession {
     composer: ChatComposer,
     app_event_rx: UnboundedReceiver<AppEvent>,
     history: Vec<Box<dyn HistoryCell>>,
+    pending_scrollback_lines: Vec<Line<'static>>,
     status: BrowserTuiStatus,
     #[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
     real: Option<RealBrowserInteractiveTuiSession>,
@@ -276,6 +278,7 @@ impl Default for BrowserInteractiveTuiSession {
             composer,
             app_event_rx,
             history: Vec::new(),
+            pending_scrollback_lines: Vec::new(),
             status: BrowserTuiStatus::Ready,
             #[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
             real: None,
@@ -308,6 +311,7 @@ impl BrowserInteractiveTuiSession {
         self.composer
             .set_text_content(prompt.unwrap_or_default(), Vec::new(), Vec::new());
         self.history.clear();
+        self.pending_scrollback_lines.clear();
         self.status = BrowserTuiStatus::Ready;
         if self.composer.current_text_with_pending().trim().is_empty() {
             let action = if browser_tui_has_auth(&options.env) {
@@ -372,42 +376,51 @@ impl BrowserInteractiveTuiSession {
             match result.kind {
                 BrowserTuiResultKind::Exec => {
                     let cwd = PathBuf::from(&self.directory);
-                    self.history.push(Box::new(new_agent_message(
+                    self.push_history_cell(Box::new(new_agent_message(
                         result.stdout.trim_end().to_string(),
                         &cwd,
-                    )));
+                    )), options);
                 }
                 BrowserTuiResultKind::Shell => {
-                    self.history
-                        .push(Box::new(PlainHistoryCell::new(raw_lines_from_source(
+                    self.push_history_cell(
+                        Box::new(PlainHistoryCell::new(raw_lines_from_source(
                             result.stdout.trim_end(),
-                        ))));
+                        ))),
+                        options,
+                    );
                 }
             }
         }
         if !result.stderr.trim().is_empty() {
-            self.history.push(Box::new(new_error_event(
-                result.stderr.trim_end().to_string(),
-            )));
+            self.push_history_cell(
+                Box::new(new_error_event(result.stderr.trim_end().to_string())),
+                options,
+            );
         }
         if result.stdout.trim().is_empty()
             && result.stderr.trim().is_empty()
             && result.kind == BrowserTuiResultKind::Shell
         {
-            self.history.push(Box::new(new_info_event(
-                "(command completed with no output)".to_string(),
-                None,
-            )));
+            self.push_history_cell(
+                Box::new(new_info_event(
+                    "(command completed with no output)".to_string(),
+                    None,
+                )),
+                options,
+            );
         }
         if result.exit_code != 0 {
             let source = match result.kind {
                 BrowserTuiResultKind::Exec => "codex exec",
                 BrowserTuiResultKind::Shell => "shell command",
             };
-            self.history.push(Box::new(new_error_event(format!(
-                "{source} exited with code {}",
-                result.exit_code
-            ))));
+            self.push_history_cell(
+                Box::new(new_error_event(format!(
+                    "{source} exited with code {}",
+                    result.exit_code
+                ))),
+                options,
+            );
         }
 
         self.render(options, BrowserTuiAction::None)
@@ -426,8 +439,7 @@ impl BrowserInteractiveTuiSession {
         self.status = BrowserTuiStatus::Ready;
         if !markdown_source.trim().is_empty() {
             let cwd = PathBuf::from(&self.directory);
-            self.history
-                .push(Box::new(new_agent_message(markdown_source, &cwd)));
+            self.push_history_cell(Box::new(new_agent_message(markdown_source, &cwd)), options);
         }
         self.render(options, BrowserTuiAction::None)
     }
@@ -443,7 +455,7 @@ impl BrowserInteractiveTuiSession {
         }
 
         self.status = BrowserTuiStatus::Ready;
-        self.history.push(Box::new(new_plan_update(update)));
+        self.push_history_cell(Box::new(new_plan_update(update)), options);
         self.render(options, BrowserTuiAction::None)
     }
 
@@ -525,7 +537,7 @@ impl BrowserInteractiveTuiSession {
         result: InputResult,
         options: &BrowserTuiSessionOptions,
     ) -> Result<BrowserTuiRunResult, String> {
-        self.drain_app_events();
+        self.drain_app_events(options);
         let action = match result {
             InputResult::Submitted { text, .. } => self.action_for_submitted_text(text, options),
             InputResult::Queued { text, action, .. } => {
@@ -539,13 +551,16 @@ impl BrowserInteractiveTuiSession {
             }
             InputResult::ServiceTierCommand(command) => {
                 self.status = BrowserTuiStatus::Ready;
-                self.history.push(Box::new(new_info_event(
-                    format!(
-                        "The native /model service-tier command '{}' is recognized, but the browser settings bridge is not wired yet.",
-                        command.name
-                    ),
-                    None,
-                )));
+                self.push_history_cell(
+                    Box::new(new_info_event(
+                        format!(
+                            "The native /model service-tier command '{}' is recognized, but the browser settings bridge is not wired yet.",
+                            command.name
+                        ),
+                        None,
+                    )),
+                    options,
+                );
                 BrowserTuiAction::None
             }
             InputResult::None => {
@@ -563,7 +578,7 @@ impl BrowserInteractiveTuiSession {
         options: &BrowserTuiSessionOptions,
     ) -> BrowserTuiAction {
         match queued_action {
-            QueuedInputAction::RunShell => self.action_for_shell_text(text),
+            QueuedInputAction::RunShell => self.action_for_shell_text(text, options),
             QueuedInputAction::ParseSlash => self.action_for_slash_text(text, options),
             QueuedInputAction::Plain => self.action_for_submitted_text(text, options),
         }
@@ -575,7 +590,7 @@ impl BrowserInteractiveTuiSession {
         options: &BrowserTuiSessionOptions,
     ) -> BrowserTuiAction {
         if text.trim_start().starts_with('!') {
-            return self.action_for_shell_text(text);
+            return self.action_for_shell_text(text, options);
         }
 
         let prompt = text.trim().to_string();
@@ -584,8 +599,7 @@ impl BrowserInteractiveTuiSession {
             return BrowserTuiAction::None;
         }
 
-        self.history
-            .push(Box::new(new_user_history_cell(prompt.clone())));
+        self.push_history_cell(Box::new(new_user_history_cell(prompt.clone())), options);
         if !browser_tui_has_auth(&options.env) {
             self.status = BrowserTuiStatus::Ready;
             return BrowserTuiAction::Login;
@@ -595,19 +609,23 @@ impl BrowserInteractiveTuiSession {
         BrowserTuiAction::Exec { prompt }
     }
 
-    fn action_for_shell_text(&mut self, text: String) -> BrowserTuiAction {
+    fn action_for_shell_text(
+        &mut self,
+        text: String,
+        options: &BrowserTuiSessionOptions,
+    ) -> BrowserTuiAction {
         let command = text
             .trim_start()
             .strip_prefix('!')
             .unwrap_or(text.as_str())
             .trim()
             .to_string();
-        self.history
-            .push(Box::new(new_user_history_cell(format!("!{command}"))));
+        self.push_history_cell(Box::new(new_user_history_cell(format!("!{command}"))), options);
         if command.is_empty() {
-            self.history.push(Box::new(new_error_event(
-                "No shell command provided.".to_string(),
-            )));
+            self.push_history_cell(
+                Box::new(new_error_event("No shell command provided.".to_string())),
+                options,
+            );
             self.status = BrowserTuiStatus::Ready;
             BrowserTuiAction::None
         } else {
@@ -631,15 +649,18 @@ impl BrowserInteractiveTuiSession {
             BrowserTuiSlashSubmission::Exit { exit_code } => BrowserTuiAction::Exit { exit_code },
             BrowserTuiSlashSubmission::Clear => {
                 self.history.clear();
+                self.pending_scrollback_lines.clear();
                 BrowserTuiAction::None
             }
             BrowserTuiSlashSubmission::Message(message) => {
-                self.history.push(Box::new(new_info_event(message, None)));
+                self.push_history_cell(Box::new(new_info_event(message, None)), options);
                 BrowserTuiAction::None
             }
             BrowserTuiSlashSubmission::Exec { command, prompt } => {
-                self.history
-                    .push(Box::new(new_user_history_cell(format!("/{command}"))));
+                self.push_history_cell(
+                    Box::new(new_user_history_cell(format!("/{command}"))),
+                    options,
+                );
                 if !browser_tui_has_auth(&options.env) {
                     return BrowserTuiAction::Login;
                 }
@@ -649,12 +670,22 @@ impl BrowserInteractiveTuiSession {
         }
     }
 
-    fn drain_app_events(&mut self) {
+    fn drain_app_events(&mut self, options: &BrowserTuiSessionOptions) {
         while let Ok(event) = self.app_event_rx.try_recv() {
             if let AppEvent::InsertHistoryCell(cell) = event {
-                self.history.push(cell);
+                self.push_history_cell(cell, options);
             }
         }
+    }
+
+    fn push_history_cell(
+        &mut self,
+        cell: Box<dyn HistoryCell>,
+        options: &BrowserTuiSessionOptions,
+    ) {
+        let width = browser_tui_width(options);
+        self.pending_scrollback_lines.extend(cell.display_lines(width));
+        self.history.push(cell);
     }
 
     fn render(
@@ -685,6 +716,7 @@ impl BrowserInteractiveTuiSession {
             ansi: frame.ansi,
             action,
             cursor: frame.cursor,
+            scrollback_ansi: take_scrollback_ansi(&mut self.pending_scrollback_lines, width),
         })
     }
 }
@@ -695,6 +727,7 @@ struct RealBrowserInteractiveTuiSession {
     app_event_rx: UnboundedReceiver<AppEvent>,
     op_rx: UnboundedReceiver<AppCommand>,
     transcript_cells: Vec<Arc<dyn HistoryCell>>,
+    pending_scrollback_lines: Vec<Line<'static>>,
     cwd: PathBuf,
     has_auth: bool,
 }
@@ -776,10 +809,11 @@ impl RealBrowserInteractiveTuiSession {
             app_event_rx,
             op_rx,
             transcript_cells: Vec::new(),
+            pending_scrollback_lines: Vec::new(),
             cwd: PathBuf::from(cwd),
             has_auth,
         };
-        session.drain_real_events();
+        session.drain_real_events(browser_tui_width(options));
         Ok(session)
     }
 
@@ -922,24 +956,29 @@ impl RealBrowserInteractiveTuiSession {
         fallback_action: BrowserTuiAction,
     ) -> Result<BrowserTuiRunResult, String> {
         self.has_auth = browser_tui_has_auth(&options.env);
-        let action = self.drain_real_events().unwrap_or(fallback_action);
+        let width = browser_tui_width(options);
+        let action = self.drain_real_events(width).unwrap_or(fallback_action);
         let frame = self.render(options)?;
         Ok(BrowserTuiRunResult {
             ansi: frame.ansi,
             action,
             cursor: frame.cursor,
+            scrollback_ansi: take_scrollback_ansi(&mut self.pending_scrollback_lines, width),
         })
     }
 
-    fn drain_real_events(&mut self) -> Option<BrowserTuiAction> {
+    fn drain_real_events(&mut self, scrollback_width: u16) -> Option<BrowserTuiAction> {
         let mut action = None;
         while let Ok(event) = self.app_event_rx.try_recv() {
             match event {
                 AppEvent::InsertHistoryCell(cell) => {
+                    self.pending_scrollback_lines
+                        .extend(cell.display_lines(scrollback_width));
                     self.transcript_cells.push(Arc::from(cell));
                 }
                 AppEvent::ClearUi => {
                     self.transcript_cells.clear();
+                    self.pending_scrollback_lines.clear();
                 }
                 AppEvent::Exit(_) => {
                     action = Some(BrowserTuiAction::Exit { exit_code: 0 });
@@ -1159,6 +1198,49 @@ fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
     env.iter()
         .find(|(candidate, _)| candidate == key)
         .map(|(_, value)| value.as_str())
+}
+
+fn browser_tui_width(options: &BrowserTuiSessionOptions) -> u16 {
+    options
+        .terminal_width
+        .unwrap_or(DEFAULT_WIDTH)
+        .clamp(40, 240)
+}
+
+fn take_scrollback_ansi(lines: &mut Vec<Line<'static>>, width: u16) -> Option<String> {
+    if lines.is_empty() {
+        return None;
+    }
+    lines_to_scrollback_ansi(std::mem::take(lines), width)
+        .ok()
+        .filter(|ansi| !ansi.is_empty())
+}
+
+fn lines_to_scrollback_ansi(lines: Vec<Line<'static>>, width: u16) -> Result<String, String> {
+    if lines.is_empty() {
+        return Ok(String::new());
+    }
+
+    let paragraph = Paragraph::new(Text::from(lines.clone())).wrap(Wrap { trim: false });
+    let height = paragraph
+        .line_count(width)
+        .max(1)
+        .min(usize::from(u16::MAX)) as u16;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).map_err(|err| err.to_string())?;
+    terminal
+        .draw(|f| {
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: false })
+                .render(f.area(), f.buffer_mut());
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut ansi = buffer_rows_to_ansi(terminal.backend().buffer());
+    if !ansi.is_empty() {
+        ansi.push_str("\r\n");
+    }
+    Ok(ansi)
 }
 
 pub fn render_browser_tui_frame_to_ansi(frame: &BrowserTuiFrame) -> Result<String, String> {
@@ -1596,6 +1678,19 @@ fn push_transcript_entry(lines: &mut Vec<Line<'static>>, item: &str) {
 
 fn buffer_to_ansi(buffer: &Buffer) -> String {
     let mut out = String::from("\u{1b}[?25l\u{1b}[2J\u{1b}[H");
+    push_buffer_rows_ansi(buffer, &mut out);
+    out.push_str("\u{1b}[0m");
+    out
+}
+
+fn buffer_rows_to_ansi(buffer: &Buffer) -> String {
+    let mut out = String::new();
+    push_buffer_rows_ansi(buffer, &mut out);
+    out.push_str("\u{1b}[0m");
+    out
+}
+
+fn push_buffer_rows_ansi(buffer: &Buffer, out: &mut String) {
     let mut current_fg = Color::Reset;
     let mut current_bg = Color::Reset;
     let mut current_modifier = Modifier::empty();
@@ -1626,9 +1721,6 @@ fn buffer_to_ansi(buffer: &Buffer) -> String {
         }
         out.push_str(line.trim_end());
     }
-
-    out.push_str("\u{1b}[0m");
-    out
 }
 
 fn push_style_diff(
