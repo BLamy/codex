@@ -664,7 +664,43 @@ impl AuthManager {
     }
 
     pub async fn refresh_token(&self) -> Result<(), RefreshTokenError> {
-        Err(std::io::Error::other("token refresh needs a browser auth host shim").into())
+        self.refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
+            .await
+    }
+
+    pub async fn refresh_external_auth(
+        &self,
+        reason: ExternalAuthRefreshReason,
+    ) -> Result<(), RefreshTokenError> {
+        let Some(external) = self
+            .external_auth
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
+        else {
+            return Err(RefreshTokenError::Transient(std::io::Error::other(
+                "token refresh needs a browser auth host shim",
+            )));
+        };
+        let previous_account_id = self
+            .auth_cached()
+            .as_ref()
+            .and_then(CodexAuth::get_account_id);
+        let tokens = external
+            .refresh(ExternalAuthRefreshContext {
+                reason,
+                previous_account_id,
+            })
+            .await
+            .map_err(RefreshTokenError::Transient)?;
+        let auth = codex_auth_from_external_tokens(external.auth_mode(), &tokens)
+            .ok_or_else(|| {
+                RefreshTokenError::Transient(std::io::Error::other(
+                    "external auth refresh returned unusable tokens",
+                ))
+            })?;
+        self.set_cached_auth(Some(auth));
+        Ok(())
     }
 
     pub async fn logout(&self) -> std::io::Result<bool> {
@@ -696,52 +732,81 @@ impl AuthManager {
             .ok()
             .and_then(|guard| guard.as_ref().cloned())?;
         let tokens = external.resolve().await.ok().flatten()?;
-        match external.auth_mode() {
-            AuthMode::ApiKey => Some(CodexAuth::from_api_key(&tokens.access_token)),
-            AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
-                let meta = tokens.chatgpt_metadata();
-                let auth_dot_json = AuthDotJson::from_external_access_token(
-                    &tokens.access_token,
-                    meta.map(|m| m.account_id.as_str()).unwrap_or(""),
-                    meta.and_then(|m| m.plan_type.as_deref()),
-                )
-                .ok()?;
-                Some(CodexAuth::ChatgptAuthTokens(ChatgptAuthTokens {
-                    auth_dot_json,
-                }))
-            }
-            AuthMode::AgentIdentity => None,
-        }
+        codex_auth_from_external_tokens(external.auth_mode(), &tokens)
     }
 }
 
+fn codex_auth_from_external_tokens(
+    auth_mode: AuthMode,
+    tokens: &ExternalAuthTokens,
+) -> Option<CodexAuth> {
+    match auth_mode {
+        AuthMode::ApiKey => Some(CodexAuth::from_api_key(&tokens.access_token)),
+        AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
+            let meta = tokens.chatgpt_metadata();
+            let auth_dot_json = AuthDotJson::from_external_access_token(
+                &tokens.access_token,
+                meta.map(|m| m.account_id.as_str()).unwrap_or(""),
+                meta.and_then(|m| m.plan_type.as_deref()),
+            )
+            .ok()?;
+            Some(CodexAuth::ChatgptAuthTokens(ChatgptAuthTokens {
+                auth_dot_json,
+            }))
+        }
+        AuthMode::AgentIdentity => None,
+    }
+}
+
+// Browser counterpart of the native UnauthorizedRecovery state machine. The
+// only recovery source in the wasm build is the host-provided ExternalAuth
+// (one refresh attempt per 401, matching the native external-auth mode).
 pub struct UnauthorizedRecovery {
     auth_manager: Arc<AuthManager>,
+    done: bool,
 }
 
 impl UnauthorizedRecovery {
     fn new(auth_manager: Arc<AuthManager>) -> Self {
-        Self { auth_manager }
+        Self {
+            auth_manager,
+            done: false,
+        }
     }
 
     pub fn has_next(&self) -> bool {
-        self.auth_manager.has_external_auth()
+        !self.done && self.auth_manager.has_external_auth()
     }
 
     pub fn unavailable_reason(&self) -> &'static str {
-        "browser auth recovery host shim is not wired"
+        if !self.auth_manager.has_external_auth() {
+            return "no_external_auth";
+        }
+        if self.done {
+            return "recovery_exhausted";
+        }
+        "ready"
     }
 
     pub fn mode_name(&self) -> &'static str {
-        "browser_auth_host"
+        "external"
     }
 
     pub fn step_name(&self) -> &'static str {
-        "refresh"
+        if self.done { "done" } else { "external_refresh" }
     }
 
     pub async fn next(&mut self) -> Result<UnauthorizedRecoveryStepResult, RefreshTokenError> {
-        Err(std::io::Error::other("browser auth recovery host shim is not wired").into())
+        if !self.has_next() {
+            return Err(std::io::Error::other("No more recovery steps available.").into());
+        }
+        self.done = true;
+        self.auth_manager
+            .refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
+            .await?;
+        Ok(UnauthorizedRecoveryStepResult {
+            auth_state_changed: Some(true),
+        })
     }
 }
 

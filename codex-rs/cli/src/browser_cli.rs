@@ -64,6 +64,7 @@ pub struct BrowserExecPlan {
     pub output_last_message_path: Option<String>,
     pub warnings: Vec<String>,
     pub cwd: Option<String>,
+    pub apply_patch_grammar: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -739,6 +740,7 @@ fn parse_exec_plan(
         output_last_message_path,
         warnings,
         cwd: cwd.or_else(|| options.cwd.clone()),
+        apply_patch_grammar: Some(include_str!("../../core/src/tools/handlers/apply_patch.lark").to_string()),
     })
 }
 
