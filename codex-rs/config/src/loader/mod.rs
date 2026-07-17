@@ -7,6 +7,7 @@ mod tests;
 use self::layer_io::LoadedConfigLayers;
 use crate::CONFIG_TOML_FILE;
 use crate::CloudConfigBundleLayers;
+use crate::ConfigLayerSource;
 use crate::ProfileV2Name;
 use crate::RequirementsLayerEntry;
 use crate::compose_requirements;
@@ -31,8 +32,8 @@ use crate::strict_config::ignored_toml_value_field;
 use crate::strict_config::unknown_feature_toml_value_field;
 use crate::thread_config::ThreadConfigContext;
 use crate::thread_config::ThreadConfigLoader;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_file_system::ExecutorFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode;
@@ -40,6 +41,7 @@ use codex_protocol::config_types::TrustLevel;
 use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
+use codex_utils_path_uri::PathUri;
 use dunce::canonicalize as normalize_path;
 use serde::Deserialize;
 use std::io;
@@ -67,6 +69,7 @@ const PROJECT_LOCAL_CONFIG_DENYLIST: &[&str] = &[
     "notify",
     "profile",
     "profiles",
+    "experimental_realtime_webrtc_call_base_url",
     "experimental_realtime_ws_base_url",
     "otel",
 ];
@@ -471,7 +474,8 @@ async fn load_config_toml_for_required_layer(
     strict_config: bool,
     create_entry: impl FnOnce(TomlValue) -> ConfigLayerEntry,
 ) -> io::Result<ConfigLayerEntry> {
-    let toml_value = match fs.read_file_text(toml_file, /*sandbox*/ None).await {
+    let toml_file_uri = PathUri::from_abs_path(toml_file);
+    let toml_value = match fs.read_file_text(&toml_file_uri, /*sandbox*/ None).await {
         Ok(contents) => {
             let config_parent = toml_file.as_path().parent().ok_or_else(|| {
                 io::Error::new(
@@ -566,8 +570,9 @@ pub async fn load_requirements_toml(
     fs: &dyn ExecutorFileSystem,
     requirements_toml_file: &AbsolutePathBuf,
 ) -> io::Result<Option<RequirementsLayerEntry>> {
+    let requirements_toml_file_uri = PathUri::from_abs_path(requirements_toml_file);
     match fs
-        .read_file_text(requirements_toml_file, /*sandbox*/ None)
+        .read_file_text(&requirements_toml_file_uri, /*sandbox*/ None)
         .await
     {
         Ok(contents) => {
@@ -617,6 +622,11 @@ fn system_requirements_toml_file() -> io::Result<AbsolutePathBuf> {
     windows_system_requirements_toml_file()
 }
 
+#[cfg(not(any(unix, windows)))]
+fn system_requirements_toml_file() -> io::Result<AbsolutePathBuf> {
+    AbsolutePathBuf::from_absolute_path(Path::new("/etc/codex/requirements.toml"))
+}
+
 fn system_requirements_toml_file_with_overrides(
     overrides: &LoaderOverrides,
 ) -> io::Result<AbsolutePathBuf> {
@@ -634,6 +644,11 @@ pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
 #[cfg(windows)]
 pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
     windows_system_config_toml_file()
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
+    AbsolutePathBuf::from_absolute_path(Path::new("/etc/codex/config.toml"))
 }
 
 fn system_config_toml_file_with_overrides(
@@ -941,6 +956,11 @@ fn sanitize_project_config(config: &mut TomlValue) -> Vec<String> {
             ignored_keys.push((*key).to_string());
         }
     }
+    if let Some(features) = table.get_mut("features").and_then(TomlValue::as_table_mut)
+        && features.remove("respect_system_proxy").is_some()
+    {
+        ignored_keys.push("features.respect_system_proxy".to_string());
+    }
 
     ignored_keys
 }
@@ -987,7 +1007,7 @@ async fn project_trust_context(
         .cloned()
         .unwrap_or_else(|| project_trust_key(project_root.as_path()));
     let checkout_root = find_git_checkout_root(fs, cwd).await;
-    let repo_root = resolve_root_git_project_for_trust(fs, cwd).await;
+    let repo_root = resolve_root_git_project_for_trust_for_target(fs, cwd).await;
     let repo_root_lookup_keys = repo_root
         .as_ref()
         .map(|root| normalized_project_trust_keys(root.as_path()));
@@ -1011,6 +1031,22 @@ async fn project_trust_context(
         projects_trust,
         user_config_file: user_config_file.clone(),
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn resolve_root_git_project_for_trust_for_target(
+    fs: &dyn ExecutorFileSystem,
+    cwd: &Path,
+) -> Option<AbsolutePathBuf> {
+    resolve_root_git_project_for_trust(fs, cwd).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn resolve_root_git_project_for_trust_for_target(
+    _fs: &dyn ExecutorFileSystem,
+    _cwd: &Path,
+) -> Option<AbsolutePathBuf> {
+    None
 }
 
 /// Canonicalize the path and convert it to a string to be used as a key in the
@@ -1135,8 +1171,9 @@ async fn find_project_root(
     for ancestor in cwd.ancestors() {
         for marker in project_root_markers {
             let marker_path = ancestor.join(marker);
+            let marker_path_uri = PathUri::from_abs_path(&marker_path);
             if fs
-                .get_metadata(&marker_path, /*sandbox*/ None)
+                .get_metadata(&marker_path_uri, /*sandbox*/ None)
                 .await
                 .is_ok()
             {
@@ -1151,14 +1188,20 @@ async fn find_git_checkout_root(
     fs: &dyn ExecutorFileSystem,
     cwd: &AbsolutePathBuf,
 ) -> Option<AbsolutePathBuf> {
-    let base = match fs.get_metadata(cwd, /*sandbox*/ None).await {
+    let cwd_uri = PathUri::from_abs_path(cwd);
+    let base = match fs.get_metadata(&cwd_uri, /*sandbox*/ None).await {
         Ok(metadata) if metadata.is_directory => cwd.clone(),
         _ => cwd.parent()?,
     };
 
     for dir in base.ancestors() {
         let dot_git = dir.join(".git");
-        if fs.get_metadata(&dot_git, /*sandbox*/ None).await.is_ok() {
+        let dot_git_uri = PathUri::from_abs_path(&dot_git);
+        if fs
+            .get_metadata(&dot_git_uri, /*sandbox*/ None)
+            .await
+            .is_ok()
+        {
             return Some(dir);
         }
     }
@@ -1206,8 +1249,9 @@ async fn load_project_layers(
     let mut startup_warnings = Vec::new();
     for dir in dirs {
         let dot_codex_abs = dir.join(".codex");
+        let dot_codex_uri = PathUri::from_abs_path(&dot_codex_abs);
         if !fs
-            .get_metadata(&dot_codex_abs, /*sandbox*/ None)
+            .get_metadata(&dot_codex_uri, /*sandbox*/ None)
             .await
             .map(|metadata| metadata.is_directory)
             .unwrap_or(false)
@@ -1224,7 +1268,8 @@ async fn load_project_layers(
             continue;
         }
         let config_file = dot_codex_abs.join(CONFIG_TOML_FILE);
-        match fs.read_file_text(&config_file, /*sandbox*/ None).await {
+        let config_file_uri = PathUri::from_abs_path(&config_file);
+        match fs.read_file_text(&config_file_uri, /*sandbox*/ None).await {
             Ok(contents) => {
                 let config: TomlValue = match toml::from_str(&contents) {
                     Ok(config) => config,
@@ -1327,8 +1372,9 @@ async fn merge_root_checkout_project_hooks(
         return Ok(config);
     };
     let hooks_config_file = hooks_config_folder.join(CONFIG_TOML_FILE);
+    let hooks_config_file_uri = PathUri::from_abs_path(&hooks_config_file);
     let root_config = match fs
-        .read_file_text(&hooks_config_file, /*sandbox*/ None)
+        .read_file_text(&hooks_config_file_uri, /*sandbox*/ None)
         .await
     {
         Ok(contents) => {
@@ -1467,7 +1513,7 @@ foo = "xyzzy"
             TomlValue::Table(toml::map::Map::from_iter([(
                 "allowed_approvals_reviewers".to_string(),
                 TomlValue::Array(vec![
-                    TomlValue::String("guardian_subagent".to_string()),
+                    TomlValue::String("auto_review".to_string()),
                     TomlValue::String("user".to_string()),
                 ]),
             )]))

@@ -19,15 +19,19 @@ codex-login = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-plugin = { workspace = true }
 codex-protocol = { workspace = true }
+codex-state = { workspace = true }
 os_info = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
-    "rt-multi-thread",
+    "rt",
 ] }
 tracing = { workspace = true, features = ["log"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
 
 [dev-dependencies]
 codex-utils-absolute-path = { workspace = true }

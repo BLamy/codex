@@ -1,8 +1,8 @@
 use super::manager::ExternalAuth;
+use super::manager::ExternalAuthFuture;
 use super::manager::ExternalAuthRefreshContext;
 use super::manager::ExternalAuthTokens;
-use async_trait::async_trait;
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use std::fmt;
 use std::io;
@@ -10,7 +10,10 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
@@ -24,13 +27,6 @@ impl BearerTokenRefresher {
         Self {
             state: Arc::new(ExternalBearerAuthState::new(config)),
         }
-    }
-}
-
-#[async_trait]
-impl ExternalAuth for BearerTokenRefresher {
-    fn auth_mode(&self) -> AuthMode {
-        AuthMode::ApiKey
     }
 
     #[expect(
@@ -73,6 +69,23 @@ impl ExternalAuth for BearerTokenRefresher {
             fetched_at: Instant::now(),
         });
         Ok(ExternalAuthTokens::access_token_only(access_token))
+    }
+}
+
+impl ExternalAuth for BearerTokenRefresher {
+    fn auth_mode(&self) -> AuthMode {
+        AuthMode::ApiKey
+    }
+
+    fn resolve(&self) -> ExternalAuthFuture<'_, Option<ExternalAuthTokens>> {
+        Box::pin(BearerTokenRefresher::resolve(self))
+    }
+
+    fn refresh(
+        &self,
+        context: ExternalAuthRefreshContext,
+    ) -> ExternalAuthFuture<'_, ExternalAuthTokens> {
+        Box::pin(BearerTokenRefresher::refresh(self, context))
     }
 }
 

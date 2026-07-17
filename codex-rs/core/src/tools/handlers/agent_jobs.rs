@@ -203,7 +203,7 @@ async fn run_agent_job_loop(
                     .agent_control
                     .spawn_agent_with_metadata(
                         options.spawn_config.clone(),
-                        items.into(),
+                        items,
                         Some(SessionSource::SubAgent(SubAgentSource::Other(format!(
                             "agent_job:{job_id}"
                         )))),
@@ -338,9 +338,9 @@ async fn export_job_csv_snapshot(
         .map_err(|err| anyhow::anyhow!("failed to render job csv for auto-export: {err}"))?;
     let output_path = PathBuf::from(job.output_csv_path.clone());
     if let Some(parent) = output_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        std::fs::create_dir_all(parent)?;
     }
-    tokio::fs::write(&output_path, csv_content).await?;
+    std::fs::write(&output_path, csv_content)?;
     Ok(())
 }
 

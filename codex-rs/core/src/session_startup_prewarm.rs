@@ -1,25 +1,119 @@
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::AtomicBool;
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::Ordering;
 use std::time::Duration;
-use std::time::Instant;
 
-use tokio::task::JoinHandle;
+#[cfg(target_arch = "wasm32")]
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::AbortOnDropHandle;
 use tracing::info;
+use tracing::instrument;
 use tracing::warn;
 
 use crate::client::ModelClientSession;
+use crate::guardian::routes_approval_to_guardian;
+use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::session::INITIAL_SUBMIT_ID;
 use crate::session::session::Session;
 use crate::session::turn::build_prompt;
 use crate::session::turn::built_tools;
+use crate::time::Instant;
 use codex_otel::STARTUP_PREWARM_AGE_AT_FIRST_TURN_METRIC;
 use codex_otel::STARTUP_PREWARM_DURATION_METRIC;
 use codex_otel::SessionTelemetry;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::BaseInstructions;
 
+#[cfg(not(target_arch = "wasm32"))]
+type SessionStartupPrewarmJoinError = tokio::task::JoinError;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct SessionStartupPrewarmJoinError;
+
+#[cfg(target_arch = "wasm32")]
+impl std::fmt::Display for SessionStartupPrewarmJoinError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "startup prewarm task cancelled")
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type SessionStartupPrewarmTask = tokio::task::JoinHandle<CodexResult<ModelClientSession>>;
+
+#[cfg(target_arch = "wasm32")]
+struct SessionStartupPrewarmTask {
+    rx: oneshot::Receiver<CodexResult<ModelClientSession>>,
+    finished: Arc<AtomicBool>,
+    aborted: Arc<AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SessionStartupPrewarmTask {
+    fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    fn abort(&self) {
+        self.aborted.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl std::future::Future for SessionStartupPrewarmTask {
+    type Output = std::result::Result<CodexResult<ModelClientSession>, SessionStartupPrewarmJoinError>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        if self.aborted.load(Ordering::Acquire) {
+            return std::task::Poll::Ready(Err(SessionStartupPrewarmJoinError));
+        }
+        match std::pin::Pin::new(&mut self.rx).poll(cx) {
+            std::task::Poll::Ready(Ok(result)) => std::task::Poll::Ready(Ok(result)),
+            std::task::Poll::Ready(Err(_)) => {
+                std::task::Poll::Ready(Err(SessionStartupPrewarmJoinError))
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_startup_prewarm_task(
+    future: impl std::future::Future<Output = CodexResult<ModelClientSession>> + Send + 'static,
+) -> SessionStartupPrewarmTask {
+    tokio::spawn(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_startup_prewarm_task(
+    future: impl std::future::Future<Output = CodexResult<ModelClientSession>> + 'static,
+) -> SessionStartupPrewarmTask {
+    let (tx, rx) = oneshot::channel();
+    let finished = Arc::new(AtomicBool::new(false));
+    let finished_for_task = Arc::clone(&finished);
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = future.await;
+        finished_for_task.store(true, Ordering::Release);
+        let _ = tx.send(result);
+    });
+    SessionStartupPrewarmTask {
+        rx,
+        finished,
+        aborted: Arc::new(AtomicBool::new(false)),
+    }
+}
+
 pub(crate) struct SessionStartupPrewarmHandle {
-    task: JoinHandle<CodexResult<ModelClientSession>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    task: AbortOnDropHandle<CodexResult<ModelClientSession>>,
+    #[cfg(target_arch = "wasm32")]
+    task: SessionStartupPrewarmTask,
     started_at: Instant,
     timeout: Duration,
 }
@@ -35,17 +129,26 @@ pub(crate) enum SessionStartupPrewarmResolution {
 
 impl SessionStartupPrewarmHandle {
     pub(crate) fn new(
-        task: JoinHandle<CodexResult<ModelClientSession>>,
+        task: SessionStartupPrewarmTask,
         started_at: Instant,
         timeout: Duration,
     ) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            task: AbortOnDropHandle::new(task),
+            #[cfg(target_arch = "wasm32")]
             task,
             started_at,
             timeout,
         }
     }
 
+    pub(crate) async fn abort(self) {
+        self.task.abort();
+        let _ = self.task.await;
+    }
+
+    #[instrument(name = "startup_prewarm.resolve", level = "trace", skip_all)]
     async fn resolve(
         self,
         session_telemetry: &SessionTelemetry,
@@ -145,7 +248,7 @@ impl SessionStartupPrewarmHandle {
     }
 
     fn resolution_from_join_result(
-        result: std::result::Result<CodexResult<ModelClientSession>, tokio::task::JoinError>,
+        result: std::result::Result<CodexResult<ModelClientSession>, SessionStartupPrewarmJoinError>,
         started_at: Instant,
     ) -> SessionStartupPrewarmResolution {
         match result {
@@ -172,15 +275,32 @@ impl SessionStartupPrewarmHandle {
 
 impl Session {
     pub(crate) async fn schedule_startup_prewarm(self: &Arc<Self>, base_instructions: String) {
-        if !self.services.model_client.responses_websocket_enabled() {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = base_instructions;
             return;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.services.model_client.responses_websocket_enabled() {
+            // Without websocket prewarm, resolve auth once so Agent Identity bootstrap can
+            // register or engage this session's bearer fallback before the first user request.
+            let model_client = self.services.model_client.clone();
+            tokio::spawn(async move {
+                if let Err(err) = model_client.prewarm_auth().await {
+                    warn!("startup auth prewarm failed: {err:#}");
+                }
+            });
+            return;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let session_telemetry = self.services.session_telemetry.clone();
         let websocket_connect_timeout = self.provider().await.websocket_connect_timeout();
         let started_at = Instant::now();
         let startup_prewarm_session = Arc::clone(self);
-        let startup_prewarm = tokio::spawn(async move {
+        let startup_prewarm = spawn_startup_prewarm_task(async move {
             let result =
                 schedule_startup_prewarm_inner(startup_prewarm_session, base_instructions).await;
             let status = if result.is_ok() { "ready" } else { "failed" };
@@ -202,6 +322,7 @@ impl Session {
             websocket_connect_timeout,
         ))
         .await;
+        }
     }
 
     pub(crate) async fn consume_startup_prewarm_for_regular_turn(
@@ -233,11 +354,28 @@ async fn schedule_startup_prewarm_inner(
         prewarm_started_at.elapsed(),
         /*status*/ None,
     );
+    if routes_approval_to_guardian(&startup_turn_context) {
+        let guardian_session = Arc::clone(&session);
+        let guardian_parent_turn = Arc::clone(&startup_turn_context);
+        drop(tokio::spawn(async move {
+            if let Err(err) = guardian_session
+                .guardian_review_session
+                .initialize(Arc::clone(&guardian_session), guardian_parent_turn)
+                .await
+            {
+                warn!("failed to initialize guardian review session: {err:#}");
+            }
+        }));
+    }
     let startup_cancellation_token = CancellationToken::new();
     let built_tools_started_at = Instant::now();
+    // Startup prewarm runs before run_turn and needs its own tool-building snapshot.
+    let step_context = session
+        .capture_step_context(Arc::clone(&startup_turn_context))
+        .await;
     let startup_router = built_tools(
         session.as_ref(),
-        startup_turn_context.as_ref(),
+        step_context.as_ref(),
         &startup_cancellation_token,
     )
     .await?;
@@ -260,10 +398,14 @@ async fn schedule_startup_prewarm_inner(
         build_prompt_started_at.elapsed(),
         /*status*/ None,
     );
-    let window_id = session.services.model_client.current_window_id();
-    let startup_turn_metadata_header = startup_turn_context
+    let window_id = session.current_window_id().await;
+    let responses_metadata = startup_turn_context
         .turn_metadata_state
-        .current_header_value_for_prewarm(&window_id);
+        .to_responses_metadata(
+            session.installation_id.clone(),
+            window_id,
+            CodexResponsesRequestKind::Prewarm,
+        );
     let mut client_session = session.services.model_client.new_session();
     let websocket_warmup_started_at = Instant::now();
     client_session
@@ -274,7 +416,7 @@ async fn schedule_startup_prewarm_inner(
             startup_turn_context.reasoning_effort.clone(),
             startup_turn_context.reasoning_summary,
             startup_turn_context.config.service_tier.clone(),
-            startup_turn_metadata_header.as_deref(),
+            &responses_metadata,
         )
         .await?;
     startup_turn_context.session_telemetry.record_startup_phase(
@@ -282,6 +424,5 @@ async fn schedule_startup_prewarm_inner(
         websocket_warmup_started_at.elapsed(),
         /*status*/ None,
     );
-
     Ok(client_session)
 }

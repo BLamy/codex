@@ -7,7 +7,6 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::fs;
 use tracing::error;
 use tracing::info;
 
@@ -102,24 +101,44 @@ impl ModelsCacheManager {
     }
 
     async fn load(&self) -> io::Result<Option<ModelsCache>> {
-        match fs::read(&self.cache_path).await {
-            Ok(contents) => {
-                let cache = serde_json::from_slice(&contents)
-                    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
-                Ok(Some(cache))
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = &self.cache_path;
+            return Ok(None);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use tokio::fs;
+
+            match fs::read(&self.cache_path).await {
+                Ok(contents) => {
+                    let cache = serde_json::from_slice(&contents)
+                        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
+                    Ok(Some(cache))
+                }
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err),
             }
-            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(err),
         }
     }
 
     async fn save_internal(&self, cache: &ModelsCache) -> io::Result<()> {
-        if let Some(parent) = self.cache_path.parent() {
-            fs::create_dir_all(parent).await?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = cache;
+            return Ok(());
         }
-        let json = serde_json::to_vec_pretty(cache)
-            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
-        fs::write(&self.cache_path, json).await
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use tokio::fs;
+
+            if let Some(parent) = self.cache_path.parent() {
+                fs::create_dir_all(parent).await?;
+            }
+            let json = serde_json::to_vec_pretty(cache)
+                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
+            fs::write(&self.cache_path, json).await
+        }
     }
 
     #[cfg(test)]

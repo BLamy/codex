@@ -1,11 +1,19 @@
 mod accepted_lines;
+#[cfg(debug_assertions)]
+mod analytics_capture;
 mod client;
 mod events;
 mod facts;
 mod reducer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 pub use accepted_lines::accepted_line_fingerprints_from_unified_diff;
 pub use accepted_lines::fingerprint_hash;
@@ -16,6 +24,7 @@ pub use events::GuardianReviewAnalyticsResult;
 pub use events::GuardianReviewDecision;
 pub use events::GuardianReviewEventParams;
 pub use events::GuardianReviewFailureReason;
+pub use events::GuardianReviewSessionAnalyticsParams;
 pub use events::GuardianReviewSessionKind;
 pub use events::GuardianReviewTerminalStatus;
 pub use events::GuardianReviewTrackContext;
@@ -24,6 +33,8 @@ pub use facts::AcceptedLineFingerprint;
 pub use facts::AnalyticsJsonRpcError;
 pub use facts::AppInvocation;
 pub use facts::CodexCompactionEvent;
+pub use facts::CodexErrKind;
+pub use facts::CodexGoalEvent;
 pub use facts::CodexTurnSteerEvent;
 pub use facts::CompactionImplementation;
 pub use facts::CompactionPhase;
@@ -31,9 +42,15 @@ pub use facts::CompactionReason;
 pub use facts::CompactionStatus;
 pub use facts::CompactionStrategy;
 pub use facts::CompactionTrigger;
+pub use facts::ExternalAgentConfigImportCompletedInput;
+pub use facts::ExternalAgentConfigImportFailureInput;
+pub use facts::GoalEventKind;
 pub use facts::HookRunFact;
 pub use facts::InputError;
 pub use facts::InvocationType;
+pub use facts::PluginInstallRequestSource;
+pub use facts::PluginInstallRequested;
+pub use facts::PluginInstallRequestedPlugin;
 pub use facts::SkillInvocation;
 pub use facts::SubAgentThreadStartedInput;
 pub use facts::ThreadInitializationMode;

@@ -18,11 +18,12 @@ use sha2::Sha256;
 use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
 
 const CLOUD_CONFIG_BUNDLE_CACHE_VERSION: u32 = 1;
 pub(super) const CLOUD_CONFIG_BUNDLE_CACHE_FILENAME: &str = "cloud-config-bundle-cache.json";
-const CLOUD_CONFIG_BUNDLE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+const CLOUD_CONFIG_BUNDLE_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const CLOUD_CONFIG_BUNDLE_CACHE_WRITE_HMAC_KEY: &[u8] =
     b"codex-cloud-config-bundle-cache-v1-6160ae70-bcfd-4ca8-a99b-40f73b3b072e";
 const CLOUD_CONFIG_BUNDLE_CACHE_READ_HMAC_KEYS: &[&[u8]] =
@@ -55,7 +56,12 @@ impl CloudConfigBundleCache {
             return Err(CacheLoadStatus::AuthIdentityIncomplete);
         };
 
-        let bytes = match fs::read(&self.path).await {
+        #[cfg(not(target_arch = "wasm32"))]
+        let read_result = fs::read(&self.path).await;
+        #[cfg(target_arch = "wasm32")]
+        let read_result = std::fs::read(&self.path);
+
+        let bytes = match read_result {
             Ok(bytes) => bytes,
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::NotFound {
@@ -155,14 +161,20 @@ impl CloudConfigBundleCache {
         .map_err(|_| CloudConfigBundleCacheError)?;
 
         if let Some(parent) = self.path.parent() {
+            #[cfg(not(target_arch = "wasm32"))]
             fs::create_dir_all(parent)
                 .await
                 .map_err(|_| CloudConfigBundleCacheError)?;
+            #[cfg(target_arch = "wasm32")]
+            std::fs::create_dir_all(parent).map_err(|_| CloudConfigBundleCacheError)?;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         fs::write(&self.path, serialized)
             .await
             .map_err(|_| CloudConfigBundleCacheError)?;
+        #[cfg(target_arch = "wasm32")]
+        std::fs::write(&self.path, serialized).map_err(|_| CloudConfigBundleCacheError)?;
         Ok(())
     }
 }

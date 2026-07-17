@@ -165,6 +165,9 @@ pub enum PluginListMarketplaceKind {
     #[serde(rename = "shared-with-me")]
     #[ts(rename = "shared-with-me")]
     SharedWithMe,
+    #[serde(rename = "created-by-me-remote")]
+    #[ts(rename = "created-by-me-remote")]
+    CreatedByMeRemote,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -638,6 +641,7 @@ pub struct PluginDetail {
     pub marketplace_name: String,
     pub marketplace_path: Option<AbsolutePathBuf>,
     pub summary: PluginSummary,
+    pub share_url: Option<String>,
     pub description: Option<String>,
     pub skills: Vec<SkillSummary>,
     pub hooks: Vec<PluginHookSummary>,
@@ -661,6 +665,7 @@ pub struct AppTemplateSummary {
     pub template_id: String,
     pub name: String,
     pub description: Option<String>,
+    pub category: Option<String>,
     pub canonical_connector_id: Option<String>,
     pub logo_url: Option<String>,
     pub logo_url_dark: Option<String>,
@@ -711,8 +716,12 @@ pub struct PluginInterface {
     pub composer_icon_url: Option<String>,
     /// Local logo path, resolved from the installed plugin package.
     pub logo: Option<AbsolutePathBuf>,
+    /// Local dark-mode logo path, resolved from the installed plugin package.
+    pub logo_dark: Option<AbsolutePathBuf>,
     /// Remote logo URL from the plugin catalog.
     pub logo_url: Option<String>,
+    /// Remote dark-mode logo URL from the plugin catalog.
+    pub logo_url_dark: Option<String>,
     /// Local screenshot paths, resolved from the installed plugin package.
     pub screenshots: Vec<AbsolutePathBuf>,
     /// Remote screenshot URLs from the plugin catalog.
@@ -734,6 +743,15 @@ pub enum PluginSource {
         path: Option<String>,
         ref_name: Option<String>,
         sha: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    Npm {
+        package: String,
+        /// Optional npm version or version range.
+        version: Option<String>,
+        /// Optional HTTPS registry URL. Authentication stays in the user's npm config.
+        registry: Option<String>,
     },
     /// The plugin is available in the remote catalog. Download metadata is
     /// kept server-side and is not exposed through the app-server API.

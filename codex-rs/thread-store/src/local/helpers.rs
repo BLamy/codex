@@ -1,8 +1,11 @@
 use std::ffi::OsStr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::FileTimes;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::OpenOptions;
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
 use chrono::DateTime;
@@ -91,9 +94,15 @@ pub(super) fn matching_rollout_file_name(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn touch_modified_time(path: &Path) -> std::io::Result<()> {
     let times = FileTimes::new().set_modified(SystemTime::now());
     OpenOptions::new().append(true).open(path)?.set_times(times)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn touch_modified_time(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub(super) fn stored_thread_from_rollout_item(
@@ -106,6 +115,7 @@ pub(super) fn stored_thread_from_rollout_item(
         .or_else(|| thread_id_from_rollout_path(item.path.as_path()))?;
     let created_at = parse_rfc3339(item.created_at.as_deref()).unwrap_or_else(Utc::now);
     let updated_at = parse_rfc3339(item.updated_at.as_deref()).unwrap_or(created_at);
+    let recency_at = parse_rfc3339(item.recency_at.as_deref()).unwrap_or(updated_at);
     let archived_at = archived.then_some(updated_at);
     let git_info = git_info_from_parts(
         item.git_sha.clone(),
@@ -122,6 +132,7 @@ pub(super) fn stored_thread_from_rollout_item(
 
     Some(StoredThread {
         thread_id,
+        extra_config: None,
         rollout_path: Some(rollout_path),
         forked_from_id: None,
         parent_thread_id: item.parent_thread_id,
@@ -135,10 +146,12 @@ pub(super) fn stored_thread_from_rollout_item(
         reasoning_effort: None,
         created_at,
         updated_at,
+        recency_at,
         archived_at,
         cwd: item.cwd.unwrap_or_default(),
         cli_version: item.cli_version.unwrap_or_default(),
         source,
+        history_mode: item.history_mode,
         thread_source: None,
         agent_nickname: item.agent_nickname,
         agent_role: item.agent_role,

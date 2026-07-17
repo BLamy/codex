@@ -6,10 +6,22 @@
 
 mod control;
 mod extensions;
+mod fs;
 mod guard;
 mod metrics;
 mod phase1;
+#[cfg(not(target_arch = "wasm32"))]
 mod phase2;
+#[cfg(target_arch = "wasm32")]
+mod phase2 {
+    use std::sync::Arc;
+
+    use codex_core::config::Config;
+
+    use crate::runtime::MemoryStartupContext;
+
+    pub async fn run(_context: Arc<MemoryStartupContext>, _config: Arc<Config>) {}
+}
 mod prompts;
 mod runtime;
 mod start;
@@ -76,7 +88,6 @@ signal to remove stale memories derived only from those resources.
 }
 
 mod stage_one {
-    pub(super) const MODEL: &str = "gpt-5.4-mini";
     pub(super) const REASONING_EFFORT: codex_protocol::openai_models::ReasoningEffort =
         codex_protocol::openai_models::ReasoningEffort::Low;
     pub(super) const CONCURRENCY_LIMIT: usize = 8;
@@ -101,7 +112,6 @@ mod stage_one {
 }
 
 mod stage_two {
-    pub(super) const MODEL: &str = "gpt-5.4";
     pub(super) const REASONING_EFFORT: codex_protocol::openai_models::ReasoningEffort =
         codex_protocol::openai_models::ReasoningEffort::Medium;
     pub(super) const JOB_LEASE_SECONDS: i64 = 3_600;
@@ -132,5 +142,5 @@ pub fn raw_memories_file(root: &Path) -> PathBuf {
 }
 
 pub async fn ensure_layout(root: &Path) -> std::io::Result<()> {
-    tokio::fs::create_dir_all(rollout_summaries_dir(root)).await
+    crate::fs::create_dir_all(rollout_summaries_dir(root)).await
 }

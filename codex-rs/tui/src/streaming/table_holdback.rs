@@ -9,7 +9,10 @@
 //! validate an entire table or predict final layout. Rendering remains the job
 //! of the markdown renderer.
 
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use crate::table_detect::FenceKind;
 use crate::table_detect::FenceTracker;

@@ -1,6 +1,7 @@
 use codex_core::config::Config;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use std::io;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[derive(Clone)]
@@ -29,8 +30,12 @@ impl LMStudioClient {
             )
         })?;
 
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
+        let mut client_builder = reqwest::Client::builder();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            client_builder = client_builder.connect_timeout(std::time::Duration::from_secs(5));
+        }
+        let client = client_builder
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -124,10 +129,12 @@ impl LMStudioClient {
     }
 
     // Find lms, checking fallback paths if not in PATH
+    #[cfg(not(target_arch = "wasm32"))]
     fn find_lms() -> std::io::Result<String> {
         Self::find_lms_with_home_dir(/*home_dir*/ None)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn find_lms_with_home_dir(home_dir: Option<&str>) -> std::io::Result<String> {
         // First try 'lms' in PATH
         if which::which("lms").is_ok() {
@@ -165,6 +172,15 @@ impl LMStudioClient {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn find_lms() -> std::io::Result<String> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "LM Studio's local `lms` CLI is native-only on wasm32",
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn download_model(&self, model: &str) -> std::io::Result<()> {
         let lms = Self::find_lms()?;
         eprintln!("Downloading model: {model}");
@@ -187,6 +203,12 @@ impl LMStudioClient {
 
         tracing::info!("Successfully downloaded model '{model}'");
         Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn download_model(&self, _model: &str) -> std::io::Result<()> {
+        let _ = Self::find_lms()?;
+        unreachable!("find_lms always returns unsupported on wasm32")
     }
 
     /// Low-level constructor given a raw host root, e.g. "http://localhost:1234".

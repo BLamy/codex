@@ -2,10 +2,10 @@
 //! rendering them in a user-friendly way.
 
 use crate::ConfigLayerEntry;
+use crate::ConfigLayerSource;
 use crate::ConfigLayerStack;
 use crate::ConfigLayerStackOrdering;
 use crate::format_config_layer_source;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use serde::de::DeserializeOwned;
 use serde_path_to_error::Path as SerdePath;
@@ -224,7 +224,7 @@ where
         let Some(path) = config_path_for_layer(layer, config_toml_file) else {
             continue;
         };
-        let contents = match tokio::fs::read_to_string(&path).await {
+        let contents = match read_config_to_string(path.as_path()).await {
             Ok(contents) => contents,
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
             Err(err) => {
@@ -244,6 +244,19 @@ where
     }
 
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn read_config_to_string(path: &Path) -> io::Result<String> {
+    tokio::fs::read_to_string(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_config_to_string(_path: &Path) -> io::Result<String> {
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "browser config VFS host shim is not wired",
+    ))
 }
 
 fn config_path_for_layer(layer: &ConfigLayerEntry, config_toml_file: &str) -> Option<PathBuf> {

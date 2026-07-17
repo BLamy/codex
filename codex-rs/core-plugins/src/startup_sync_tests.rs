@@ -1,5 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,6 +16,22 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+#[test]
+fn git_command_sanitizes_ambient_repository_environment() {
+    let command = git_command("git");
+
+    for name in REPOSITORY_LOCAL_GIT_ENVIRONMENT_VARIABLES {
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(key, _)| *key == OsStr::new(name))
+                .map(|(_, value)| value),
+            Some(None),
+            "{name} should be removed from startup sync Git commands"
+        );
+    }
+}
 
 fn write_file(path: &Path, contents: &str) {
     std::fs::create_dir_all(path.parent().expect("file should have a parent")).unwrap();
@@ -230,7 +247,10 @@ fn read_curated_plugins_sha_reads_trimmed_sha_file() {
 #[test]
 fn remove_stale_curated_repo_temp_dirs_removes_only_matching_directories() {
     use std::os::unix::ffi::OsStrExt;
-    use std::time::SystemTime;
+    #[cfg(not(target_arch = "wasm32"))]
+use std::time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
 
     fn set_dir_mtime(path: &Path, age: Duration) -> Result<(), Box<dyn std::error::Error>> {
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;

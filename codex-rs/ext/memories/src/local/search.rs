@@ -134,7 +134,7 @@ async fn search_file(
     context_lines: usize,
     matches: &mut Vec<MemorySearchMatch>,
 ) -> Result<(), MemoriesBackendError> {
-    let content = match tokio::fs::read_to_string(path).await {
+    let content = match crate::fs::read_to_string(path).await {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::InvalidData => return Ok(()),
         Err(err) => return Err(err.into()),

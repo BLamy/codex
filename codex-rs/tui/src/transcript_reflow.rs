@@ -13,7 +13,10 @@
 //! final source-backed reflow after the stream becomes source-backed history.
 
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 pub(crate) const TRANSCRIPT_REFLOW_DEBOUNCE: Duration = Duration::from_millis(75);
 
@@ -36,9 +39,9 @@ pub(crate) struct TranscriptReflowState {
 impl TranscriptReflowState {
     /// Reset all width, pending deadline, and stream repair state.
     ///
-    /// Call this when resize reflow is disabled or when the app discards the transcript state that
-    /// pending reflow work would have rebuilt. Leaving stale deadlines behind would make a later
-    /// draw attempt to rebuild history from unrelated cells.
+    /// Call this when the app discards the transcript state that pending reflow work would have
+    /// rebuilt. Leaving stale deadlines behind would make a later draw attempt to rebuild history
+    /// from unrelated cells.
     pub(crate) fn clear(&mut self) {
         *self = Self::default();
     }

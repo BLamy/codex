@@ -1,46 +1,53 @@
-mod description;
-mod response;
+mod cell_actor;
+mod remote_session;
+#[cfg(not(target_arch = "wasm32"))]
 mod runtime;
+#[cfg(target_arch = "wasm32")]
+mod runtime_wasm;
+#[cfg(not(target_arch = "wasm32"))]
 mod service;
+#[cfg(target_arch = "wasm32")]
+mod service_wasm;
+mod session_runtime;
 
-pub use description::CODE_MODE_PRAGMA_PREFIX;
-pub use description::CodeModeToolKind;
-pub use description::ToolDefinition;
-pub use description::ToolNamespaceDescription;
-pub use description::augment_tool_definition;
-pub use description::build_exec_tool_description;
-pub use description::build_wait_tool_description;
-pub use description::is_code_mode_nested_tool;
-pub use description::normalize_code_mode_identifier;
-pub use description::parse_exec_source;
-pub use description::render_code_mode_sample;
-pub use description::render_json_schema_to_typescript;
-pub use response::DEFAULT_IMAGE_DETAIL;
-pub use response::FunctionCallOutputContentItem;
-pub use response::ImageDetail;
-pub use runtime::CodeModeNestedToolCall;
-pub use runtime::DEFAULT_EXEC_YIELD_TIME_MS;
-pub use runtime::DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL;
-pub use runtime::DEFAULT_WAIT_YIELD_TIME_MS;
-pub use runtime::ExecuteRequest;
-pub use runtime::ExecuteToPendingOutcome;
-pub use runtime::RuntimeResponse;
-pub use runtime::WaitOutcome;
-pub use runtime::WaitRequest;
-pub use runtime::WaitToPendingOutcome;
-pub use runtime::WaitToPendingRequest;
-pub use service::CellId;
-pub use service::CodeModeService;
-pub use service::CodeModeSession;
-pub use service::CodeModeSessionDelegate;
-pub use service::CodeModeSessionProvider;
-pub use service::CodeModeSessionProviderFuture;
-pub use service::CodeModeSessionResultFuture;
+pub(crate) type TaskFailureHandler = std::sync::Arc<dyn Fn(String) + Send + Sync>;
+
+pub use codex_code_mode_protocol::*;
+pub use remote_session::ProcessOwnedCodeModeSession;
+pub use remote_session::ProcessOwnedCodeModeSessionProvider;
+#[cfg(not(target_arch = "wasm32"))]
+pub use service::InProcessCodeModeSession;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::InProcessCodeModeSessionProvider;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::NoopCodeModeSessionDelegate;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::NotificationFuture;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::StartedCell;
+#[cfg(not(target_arch = "wasm32"))]
 pub use service::ToolInvocationFuture;
-
-pub const PUBLIC_TOOL_NAME: &str = "exec";
-pub const WAIT_TOOL_NAME: &str = "wait";
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CellId;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeService;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSession;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionDelegate;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionProvider;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionProviderFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::CodeModeSessionResultFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::InProcessCodeModeSessionProvider;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::NoopCodeModeSessionDelegate;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::NotificationFuture;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::StartedCell;
+#[cfg(target_arch = "wasm32")]
+pub use service_wasm::ToolInvocationFuture;

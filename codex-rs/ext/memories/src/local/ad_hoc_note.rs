@@ -63,7 +63,7 @@ async fn ensure_directory(path: &Path) -> Result<(), MemoriesBackendError> {
                 "must be a directory",
             ));
         }
-        None => tokio::fs::create_dir(path).await?,
+        None => crate::fs::create_dir(path).await?,
     }
 
     let Some(metadata) = LocalMemoriesBackend::metadata_or_none(path).await? else {

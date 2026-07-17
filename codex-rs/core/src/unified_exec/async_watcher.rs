@@ -22,9 +22,19 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
 use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::ExecOutputStream;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 
 pub(crate) const TRAILING_OUTPUT_GRACE: Duration = Duration::from_millis(100);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_async_watcher_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_async_watcher_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
 
 /// Upper bound for a single ExecCommandOutputDelta chunk emitted by unified exec.
 ///
@@ -50,7 +60,7 @@ pub(crate) fn start_streaming_output(
     let turn_ref = Arc::clone(&context.turn);
     let call_id = context.call_id.clone();
 
-    tokio::spawn(async move {
+    spawn_async_watcher_task(async move {
         use tokio::sync::broadcast::error::RecvError;
 
         let mut pending = Vec::<u8>::new();
@@ -110,7 +120,7 @@ pub(crate) fn spawn_exit_watcher(
     turn_ref: Arc<TurnContext>,
     call_id: String,
     command: Vec<String>,
-    cwd: AbsolutePathBuf,
+    cwd: PathUri,
     process_id: i32,
     transcript: Arc<Mutex<HeadTailBuffer>>,
     started_at: Instant,
@@ -118,7 +128,7 @@ pub(crate) fn spawn_exit_watcher(
     let exit_token = process.cancellation_token();
     let output_drained = process.output_drained_notify();
 
-    tokio::spawn(async move {
+    spawn_async_watcher_task(async move {
         exit_token.cancelled().await;
         output_drained.notified().await;
 
@@ -197,7 +207,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
     turn_ref: Arc<TurnContext>,
     call_id: String,
     command: Vec<String>,
-    cwd: AbsolutePathBuf,
+    cwd: PathUri,
     process_id: Option<String>,
     transcript: Arc<Mutex<HeadTailBuffer>>,
     fallback_output: String,
@@ -242,7 +252,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
     turn_ref: Arc<TurnContext>,
     call_id: String,
     command: Vec<String>,
-    cwd: AbsolutePathBuf,
+    cwd: PathUri,
     process_id: Option<String>,
     transcript: Arc<Mutex<HeadTailBuffer>>,
     fallback_output: String,

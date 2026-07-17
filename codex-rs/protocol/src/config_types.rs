@@ -166,8 +166,8 @@ pub enum ApprovalsReviewer {
     #[default]
     #[serde(rename = "user")]
     User,
-    #[serde(rename = "guardian_subagent", alias = "auto_review")]
-    #[strum(serialize = "guardian_subagent")]
+    #[serde(rename = "auto_review", alias = "guardian_subagent")]
+    #[strum(serialize = "auto_review")]
     AutoReview,
 }
 
@@ -296,15 +296,33 @@ pub enum Personality {
     Pragmatic,
 }
 
+/// Controls whether the model receives multi-agent delegation instructions and,
+/// when it does, whether it should only spawn sub-agents after an explicit user
+/// request or may delegate proactively when doing so would help. `none` leaves
+/// the multi-agent tools available without injecting delegation instructions.
 #[derive(
     Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS, Default,
 )]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
+pub enum MultiAgentMode {
+    None,
+    #[default]
+    ExplicitRequestOnly,
+    Proactive,
+}
+
+#[derive(
+    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS, Default,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum WebSearchMode {
     Disabled,
     #[default]
     Cached,
+    Indexed,
     Live,
 }
 
@@ -760,7 +778,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ApprovalsReviewer::AutoReview).expect("serialize reviewer"),
-            "\"guardian_subagent\""
+            "\"auto_review\""
         );
 
         for value in ["user", "auto_review", "guardian_subagent"] {

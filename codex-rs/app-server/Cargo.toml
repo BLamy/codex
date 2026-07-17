@@ -21,8 +21,24 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-app-server-protocol = { workspace = true }
+codex-app-server-transport = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+http = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+codex-arg0 = { workspace = true }
+codex-config = { workspace = true }
+codex-core = { workspace = true }
+codex-exec-server = { workspace = true }
+codex-feedback = { workspace = true }
+codex-protocol = { workspace = true }
+codex-rollout = { workspace = true }
+toml = { workspace = true }
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 base64 = { workspace = true }
 axum = { workspace = true, default-features = false, features = [
     "http1",
@@ -34,8 +50,10 @@ codex-analytics = { workspace = true }
 codex-arg0 = { workspace = true }
 codex-cloud-config = { workspace = true }
 codex-config = { workspace = true }
+codex-connectors = { workspace = true }
 codex-core = { workspace = true }
 codex-core-plugins = { workspace = true }
+codex-home = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-external-agent-migration = { workspace = true }
@@ -49,6 +67,7 @@ codex-hooks = { workspace = true }
 codex-otel = { workspace = true }
 codex-plugin = { workspace = true }
 codex-shell-command = { workspace = true }
+codex-skills-extension = { workspace = true }
 codex-utils-cli = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-backend-client = { workspace = true }
@@ -60,11 +79,10 @@ codex-memories-extension = { workspace = true }
 codex-web-search-extension = { workspace = true }
 codex-memories-write = { workspace = true }
 codex-mcp = { workspace = true }
+codex-mcp-extension = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-protocol = { workspace = true }
-codex-app-server-protocol = { workspace = true }
-codex-app-server-transport = { workspace = true }
 codex-feedback = { workspace = true }
 codex-rmcp-client = { workspace = true }
 codex-rollout = { workspace = true }
@@ -72,8 +90,8 @@ codex-sandboxing = { workspace = true }
 codex-state = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-tools = { workspace = true }
-codex-utils-absolute-path = { workspace = true }
 codex-utils-json-to-toml = { workspace = true }
+codex-utils-path-uri = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }

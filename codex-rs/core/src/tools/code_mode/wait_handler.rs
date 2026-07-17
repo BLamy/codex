@@ -9,6 +9,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use crate::time::Instant;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
@@ -44,7 +45,6 @@ where
     })
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(WAIT_TOOL_NAME)
@@ -54,7 +54,13 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
         create_wait_tool()
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CodeModeWaitHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
@@ -72,7 +78,7 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
             {
                 let args: ExecWaitArgs = parse_arguments(&arguments)?;
                 let exec = ExecContext { session, turn };
-                let started_at = std::time::Instant::now();
+                let started_at = Instant::now();
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
                 let wait_response = if args.terminate {
                     exec.session

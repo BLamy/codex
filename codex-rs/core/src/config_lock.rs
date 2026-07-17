@@ -19,7 +19,7 @@ pub(crate) struct ConfigLockReplayOptions {
 pub(crate) async fn read_config_lock_from_path(
     path: &AbsolutePathBuf,
 ) -> io::Result<ConfigLockfileToml> {
-    let contents = tokio::fs::read_to_string(path).await.map_err(|err| {
+    let contents = std::fs::read_to_string(path).map_err(|err| {
         config_lock_error(format!(
             "failed to read config lock file {}: {err}",
             path.display()
@@ -125,6 +125,9 @@ fn config_lock_for_comparison(
 ) -> ConfigLockfileToml {
     let mut lockfile = lockfile.clone();
     clear_config_lock_debug_controls(&mut lockfile.config);
+    if let Some(features) = lockfile.config.features.as_mut() {
+        features.clear_removed_compatibility_entries();
+    }
     if options.allow_codex_version_mismatch {
         lockfile.codex_version.clear();
     }

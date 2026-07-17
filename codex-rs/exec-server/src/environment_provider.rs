@@ -1,4 +1,5 @@
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::Environment;
 use crate::ExecServerError;
@@ -13,11 +14,13 @@ use crate::environment::REMOTE_ENVIRONMENT_ID;
 /// selection. Providers should only return provider-owned remote environments;
 /// `include_local` controls whether `EnvironmentManager` should add the local
 /// environment to the snapshot.
-#[async_trait]
 pub trait EnvironmentProvider: Send + Sync {
     /// Returns the provider-owned environment startup snapshot.
-    async fn snapshot(&self) -> Result<EnvironmentProviderSnapshot, ExecServerError>;
+    fn snapshot(&self) -> EnvironmentProviderFuture<'_>;
 }
+
+pub type EnvironmentProviderFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<EnvironmentProviderSnapshot, ExecServerError>> + Send + 'a>>;
 
 #[derive(Clone, Debug)]
 pub struct EnvironmentProviderSnapshot {
@@ -53,12 +56,15 @@ impl DefaultEnvironmentProvider {
         let mut environments = Vec::new();
         let (exec_server_url, disabled) = normalize_exec_server_url(self.exec_server_url.clone());
 
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(exec_server_url) = exec_server_url {
             environments.push((
                 REMOTE_ENVIRONMENT_ID.to_string(),
                 Environment::remote_inner(exec_server_url, /*local_runtime_paths*/ None),
             ));
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = exec_server_url;
 
         let has_remote = environments
             .iter()
@@ -80,10 +86,9 @@ impl DefaultEnvironmentProvider {
     }
 }
 
-#[async_trait]
 impl EnvironmentProvider for DefaultEnvironmentProvider {
-    async fn snapshot(&self) -> Result<EnvironmentProviderSnapshot, ExecServerError> {
-        Ok(self.snapshot_inner())
+    fn snapshot(&self) -> EnvironmentProviderFuture<'_> {
+        Box::pin(async { Ok(self.snapshot_inner()) })
     }
 }
 

@@ -7,7 +7,6 @@ use std::io::{self};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::anyhow;
@@ -32,8 +31,10 @@ pub const DOCTOR_REPORT_ATTACHMENT_FILENAME: &str = "codex-doctor-report.json";
 /// Filename used for the Windows sandbox log feedback attachment.
 pub const WINDOWS_SANDBOX_LOG_ATTACHMENT_FILENAME: &str = "windows-sandbox.log";
 const DEFAULT_MAX_BYTES: usize = 4 * 1024 * 1024; // 4 MiB
+#[cfg(not(target_arch = "wasm32"))]
 const SENTRY_DSN: &str =
     "https://ae32ed50620d7a7792c1ce5df38b3e3e@o33249.ingest.us.sentry.io/4510195390611458";
+#[cfg(not(target_arch = "wasm32"))]
 const UPLOAD_TIMEOUT_SECS: u64 = 10;
 const FEEDBACK_TAGS_TARGET: &str = "feedback_tags";
 const MAX_FEEDBACK_TAGS: usize = 64;
@@ -415,9 +416,11 @@ impl FeedbackSnapshot {
     }
 
     /// Upload feedback to Sentry with optional attachments.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_feedback(&self, options: FeedbackUploadOptions<'_>) -> Result<()> {
         use std::str::FromStr;
         use std::sync::Arc;
+        use std::time::Duration;
 
         use sentry::Client;
         use sentry::ClientOptions;
@@ -486,6 +489,15 @@ impl FeedbackSnapshot {
         Ok(())
     }
 
+    /// Uploading feedback requires the native Sentry transport. Browser Codex should keep
+    /// capturing logs/tags, then hand feedback upload to a host shim when that exists.
+    #[cfg(target_arch = "wasm32")]
+    pub fn upload_feedback(&self, _options: FeedbackUploadOptions<'_>) -> Result<()> {
+        Err(anyhow!(
+            "Codex feedback upload is not available on wasm32; use a host feedback upload shim"
+        ))
+    }
+
     fn upload_tags(
         &self,
         classification: &str,
@@ -535,6 +547,7 @@ impl FeedbackSnapshot {
         tags
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn feedback_attachments(
         &self,
         include_logs: bool,

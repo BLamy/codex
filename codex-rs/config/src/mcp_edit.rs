@@ -4,6 +4,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task;
 use toml::Value as TomlValue;
 use toml_edit::DocumentMut;
@@ -13,6 +14,7 @@ use toml_edit::value;
 
 use crate::AppToolApproval;
 use crate::CONFIG_TOML_FILE;
+use crate::McpServerAuth;
 use crate::McpServerConfig;
 use crate::McpServerEnvVar;
 use crate::McpServerTransportConfig;
@@ -21,7 +23,7 @@ pub async fn load_global_mcp_servers(
     codex_home: &Path,
 ) -> std::io::Result<BTreeMap<String, McpServerConfig>> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let raw = match tokio::fs::read_to_string(&config_path).await {
+    let raw = match read_config_to_string(config_path.as_path()).await {
         Ok(raw) => raw,
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(err) => return Err(err),
@@ -38,6 +40,19 @@ pub async fn load_global_mcp_servers(
         .clone()
         .try_into()
         .map_err(|err| std::io::Error::new(ErrorKind::InvalidData, err))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn read_config_to_string(path: &Path) -> std::io::Result<String> {
+    tokio::fs::read_to_string(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_config_to_string(_path: &Path) -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        ErrorKind::NotFound,
+        "browser config VFS host shim is not wired",
+    ))
 }
 
 fn ensure_no_inline_bearer_tokens(value: &TomlValue) -> std::io::Result<()> {
@@ -77,12 +92,22 @@ impl ConfigEditsBuilder {
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn apply(self) -> std::io::Result<()> {
         task::spawn_blocking(move || self.apply_blocking())
             .await
             .map_err(|err| {
                 std::io::Error::other(format!("config persistence task panicked: {err}"))
             })?
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn apply(self) -> std::io::Result<()> {
+        let _ = self;
+        Err(std::io::Error::new(
+            ErrorKind::Unsupported,
+            "writing config.toml in the browser requires a VFS host shim",
+        ))
     }
 
     fn apply_blocking(self) -> std::io::Result<()> {
@@ -146,7 +171,7 @@ fn serialize_mcp_server(config: &McpServerConfig) -> TomlItem {
                 entry["env_vars"] = array_from_env_vars(env_vars);
             }
             if let Some(cwd) = cwd {
-                entry["cwd"] = value(cwd.to_string_lossy().to_string());
+                entry["cwd"] = value(cwd.as_str());
             }
         }
         McpServerTransportConfig::StreamableHttp {
@@ -172,6 +197,9 @@ fn serialize_mcp_server(config: &McpServerConfig) -> TomlItem {
         }
     }
 
+    if matches!(&config.auth, McpServerAuth::ChatGpt) {
+        entry["auth"] = value("chatgpt");
+    }
     if !config.enabled {
         entry["enabled"] = value(false);
     }

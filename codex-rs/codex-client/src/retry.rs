@@ -1,9 +1,17 @@
 use crate::error::TransportError;
 use crate::request::Request;
+#[cfg(not(target_arch = "wasm32"))]
 use rand::Rng;
 use std::future::Future;
 use std::time::Duration;
-use tokio::time::sleep;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::closure::Closure;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
 
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
@@ -42,8 +50,15 @@ pub fn backoff(base: Duration, attempt: u64) -> Duration {
     let exp = 2u64.saturating_pow(attempt as u32 - 1);
     let millis = base.as_millis() as u64;
     let raw = millis.saturating_mul(exp);
-    let jitter: f64 = rand::rng().random_range(0.9..1.1);
-    Duration::from_millis((raw as f64 * jitter) as u64)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let jitter: f64 = rand::rng().random_range(0.9..1.1);
+        Duration::from_millis((raw as f64 * jitter) as u64)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Duration::from_millis(raw)
+    }
 }
 
 pub async fn run_with_retry<T, F, Fut>(
@@ -64,10 +79,43 @@ where
                     .retry_on
                     .should_retry(&err, attempt, policy.max_attempts) =>
             {
-                sleep(backoff(policy.base_delay, attempt + 1)).await;
+                sleep_duration(backoff(policy.base_delay, attempt + 1)).await;
             }
             Err(err) => return Err(err),
         }
     }
     Err(TransportError::RetryLimit)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sleep_duration(duration: Duration) {
+    tokio::time::sleep(duration).await;
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep_duration(duration: Duration) {
+    let timeout_ms = duration.as_millis().min(i32::MAX as u128) as i32;
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let resolve_for_callback = resolve.clone();
+        let callback = Closure::once_into_js(move || {
+            let _ = resolve_for_callback.call0(&JsValue::UNDEFINED);
+        });
+        let scheduled = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("setTimeout"))
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+            .and_then(|set_timeout| {
+                set_timeout
+                    .call2(
+                        &JsValue::UNDEFINED,
+                        callback.as_ref(),
+                        &JsValue::from_f64(timeout_ms as f64),
+                    )
+                    .ok()
+            })
+            .is_some();
+        if !scheduled {
+            let _ = resolve.call0(&JsValue::UNDEFINED);
+        }
+    });
+    let _ = JsFuture::from(promise).await;
 }

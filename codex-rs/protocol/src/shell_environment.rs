@@ -11,7 +11,15 @@ pub fn create_env(
     policy: &ShellEnvironmentPolicy,
     thread_id: Option<&str>,
 ) -> HashMap<String, String> {
-    create_env_from_vars(std::env::vars(), policy, thread_id)
+    #[cfg(target_arch = "wasm32")]
+    {
+        create_env_from_vars(std::iter::empty::<(String, String)>(), policy, thread_id)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        create_env_from_vars(std::env::vars(), policy, thread_id)
+    }
 }
 
 pub fn create_env_from_vars<I>(

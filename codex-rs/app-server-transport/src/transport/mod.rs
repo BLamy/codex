@@ -1,21 +1,28 @@
+#[cfg(not(target_arch = "wasm32"))]
 pub mod auth;
 
 use crate::outgoing_message::ConnectionId;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::outgoing_message::OutgoingError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::QueuedOutgoingMessage;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::JSONRPCMessage;
-use codex_core::config::find_codex_home;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::AtomicU64;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::error;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::warn;
 
 /// Size of the bounded channels used to communicate between tasks. The value
@@ -23,24 +30,51 @@ use tracing::warn;
 /// plenty for an interactive CLI.
 pub const CHANNEL_CAPACITY: usize = 128;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod remote_control;
+#[cfg(not(target_arch = "wasm32"))]
 mod stdio;
+#[cfg(not(target_arch = "wasm32"))]
 mod unix_socket;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod unix_socket_tests;
+#[cfg(not(target_arch = "wasm32"))]
 mod websocket;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::REMOTE_CONTROL_DISABLED_ENV_VAR;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::RemoteControlDisabledByRequirements;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::RemoteControlEnableError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_control::RemoteControlHandle;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::RemoteControlPolicy;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_control::RemoteControlStartConfig;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::RemoteControlStartupMode;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_control::RemoteControlUnavailable;
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_control::start_remote_control;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote_control::take_remote_control_disabled_env;
+#[cfg(not(target_arch = "wasm32"))]
 pub use stdio::start_stdio_connection;
+#[cfg(not(target_arch = "wasm32"))]
 pub use unix_socket::AppServerStartupLock;
+#[cfg(not(target_arch = "wasm32"))]
 pub use unix_socket::acquire_app_server_startup_lock;
+#[cfg(not(target_arch = "wasm32"))]
 pub use unix_socket::prepare_control_socket_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use unix_socket::start_control_socket_acceptor;
+#[cfg(not(target_arch = "wasm32"))]
 pub use websocket::start_websocket_acceptor;
 
+#[cfg(not(target_arch = "wasm32"))]
 const OVERLOADED_ERROR_CODE: i64 = -32001;
 
 const APP_SERVER_CONTROL_SOCKET_DIR_NAME: &str = "app-server-control";
@@ -112,18 +146,30 @@ impl AppServerTransport {
 
         if let Some(raw_socket_path) = listen_url.strip_prefix("unix://") {
             let socket_path = if raw_socket_path.is_empty() {
-                let codex_home = find_codex_home().map_err(|err| {
-                    AppServerTransportParseError::InvalidUnixSocketPath {
-                        listen_url: listen_url.to_string(),
-                        message: format!("failed to resolve CODEX_HOME: {err}"),
-                    }
-                })?;
-                app_server_control_socket_path(&codex_home).map_err(|err| {
-                    AppServerTransportParseError::InvalidUnixSocketPath {
-                        listen_url: listen_url.to_string(),
-                        message: err.to_string(),
-                    }
-                })?
+                #[cfg(target_arch = "wasm32")]
+                {
+                    return Err(AppServerTransportParseError::UnsupportedListenUrl(
+                        listen_url.to_string(),
+                    ));
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use codex_core::config::find_codex_home;
+
+                    let codex_home = find_codex_home().map_err(|err| {
+                        AppServerTransportParseError::InvalidUnixSocketPath {
+                            listen_url: listen_url.to_string(),
+                            message: format!("failed to resolve CODEX_HOME: {err}"),
+                        }
+                    })?;
+                    app_server_control_socket_path(&codex_home).map_err(|err| {
+                        AppServerTransportParseError::InvalidUnixSocketPath {
+                            listen_url: listen_url.to_string(),
+                            message: err.to_string(),
+                        }
+                    })?
+                }
             } else {
                 AbsolutePathBuf::relative_to_current_dir(raw_socket_path).map_err(|err| {
                     AppServerTransportParseError::InvalidUnixSocketPath {
@@ -185,12 +231,15 @@ pub enum ConnectionOrigin {
     RemoteControl,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static CONNECTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(not(target_arch = "wasm32"))]
 fn next_connection_id() -> ConnectionId {
     ConnectionId(CONNECTION_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn forward_incoming_message(
     transport_event_tx: &mpsc::Sender<TransportEvent>,
     writer: &mpsc::Sender<QueuedOutgoingMessage>,
@@ -208,6 +257,7 @@ async fn forward_incoming_message(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn enqueue_incoming_message(
     transport_event_tx: &mpsc::Sender<TransportEvent>,
     writer: &mpsc::Sender<QueuedOutgoingMessage>,
@@ -249,6 +299,7 @@ async fn enqueue_incoming_message(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn serialize_outgoing_message(outgoing_message: OutgoingMessage) -> Option<String> {
     let value = match serde_json::to_value(outgoing_message) {
         Ok(value) => value,

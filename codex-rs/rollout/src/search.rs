@@ -12,6 +12,7 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::USER_MESSAGE_BEGIN;
 use regex::Regex;
 use regex::RegexBuilder;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 
 use super::ARCHIVED_SESSIONS_SUBDIR;
@@ -21,6 +22,7 @@ use super::compression;
 const MATCH_CONTEXT_BEFORE_CHARS: usize = 48;
 const MATCH_CONTEXT_AFTER_CHARS: usize = 96;
 
+/// Search matches keyed by the canonical `.jsonl` path for each rollout.
 pub type RolloutSearchMatches = HashMap<PathBuf, Option<String>>;
 
 pub async fn search_rollout_paths(
@@ -69,48 +71,57 @@ async fn ripgrep_rollout_paths(
         return Ok(Some(HashSet::new()));
     }
 
-    let output = match Command::new(rg_command)
-        .arg("-l")
-        .arg("--fixed-strings")
-        .arg("--ignore-case")
-        .arg("--no-ignore")
-        .arg("--glob")
-        .arg("*.jsonl")
-        .arg("--")
-        .arg(search_term)
-        .arg(root)
-        .output()
-        .await
+    #[cfg(target_arch = "wasm32")]
     {
-        Ok(output) => output,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Ok(None);
-        }
-        Err(err) => return Err(err),
-    };
-    if !output.status.success() {
-        if output.status.code() == Some(1) && output.stderr.is_empty() {
-            return Ok(Some(HashSet::new()));
-        }
-
-        return Err(io::Error::other(format!(
-            "ripgrep rollout search failed under {}",
-            root.display()
-        )));
+        let _ = (rg_command, search_term);
+        return Ok(None);
     }
 
-    let mut matches = HashSet::new();
-    for line in String::from_utf8_lossy(output.stdout.as_slice()).lines() {
-        let path = PathBuf::from(line);
-        let path = if path.is_absolute() {
-            path
-        } else {
-            root.join(path)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let output = match Command::new(rg_command)
+            .arg("-l")
+            .arg("--fixed-strings")
+            .arg("--ignore-case")
+            .arg("--no-ignore")
+            .arg("--glob")
+            .arg("*.jsonl")
+            .arg("--")
+            .arg(search_term)
+            .arg(root)
+            .output()
+            .await
+        {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
         };
-        matches.insert(path);
-    }
+        if !output.status.success() {
+            if output.status.code() == Some(1) && output.stderr.is_empty() {
+                return Ok(Some(HashSet::new()));
+            }
 
-    Ok(Some(matches))
+            return Err(io::Error::other(format!(
+                "ripgrep rollout search failed under {}",
+                root.display()
+            )));
+        }
+
+        let mut matches = HashSet::new();
+        for line in String::from_utf8_lossy(output.stdout.as_slice()).lines() {
+            let path = PathBuf::from(line);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            };
+            matches.insert(path);
+        }
+
+        Ok(Some(matches))
+    }
 }
 
 async fn scan_rollout_matches(
@@ -145,7 +156,10 @@ async fn scan_rollout_matches(
                 if let Some(snippet) =
                     first_rollout_content_match_snippet(rollout_file.path(), search_term).await?
                 {
-                    matches.insert(rollout_file.into_path(), Some(snippet));
+                    matches.insert(
+                        compression::plain_rollout_path(rollout_file.path()),
+                        Some(snippet),
+                    );
                 }
                 continue;
             }
@@ -217,7 +231,10 @@ async fn scan_compressed_rollout_matches(
             if let Some(snippet) =
                 first_rollout_content_match_snippet(rollout_file.path(), search_term).await?
             {
-                matches.insert(rollout_file.into_path(), Some(snippet));
+                matches.insert(
+                    compression::plain_rollout_path(rollout_file.path()),
+                    Some(snippet),
+                );
             }
         }
     }
@@ -276,7 +293,10 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
         | RolloutItem::TurnContext(_)
         | RolloutItem::EventMsg(_)
         | RolloutItem::ResponseItem(_)
-        | RolloutItem::Compacted(_) => None,
+        | RolloutItem::InterAgentCommunication(_)
+        | RolloutItem::InterAgentCommunicationMetadata { .. }
+        | RolloutItem::Compacted(_)
+        | RolloutItem::WorldState(_) => None,
     }
 }
 

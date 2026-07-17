@@ -9,12 +9,17 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-codex-app-server-protocol = { workspace = true }
+codex-config = { workspace = true }
+codex-plugin = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 tracing = { workspace = true }
 urlencoding = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

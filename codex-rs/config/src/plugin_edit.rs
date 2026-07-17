@@ -4,6 +4,7 @@ use std::path::Path;
 
 use codex_utils_path::resolve_symlink_write_paths;
 use codex_utils_path::write_atomically;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
@@ -41,10 +42,24 @@ pub async fn apply_user_plugin_config_edits(
     codex_home: &Path,
     edits: Vec<PluginConfigEdit>,
 ) -> std::io::Result<()> {
-    let codex_home = codex_home.to_path_buf();
-    task::spawn_blocking(move || apply_user_plugin_config_edits_blocking(&codex_home, edits))
-        .await
-        .map_err(|err| std::io::Error::other(format!("config persistence task panicked: {err}")))?
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let codex_home = codex_home.to_path_buf();
+        task::spawn_blocking(move || apply_user_plugin_config_edits_blocking(&codex_home, edits))
+            .await
+            .map_err(|err| {
+                std::io::Error::other(format!("config persistence task panicked: {err}"))
+            })?
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (codex_home, edits);
+        Err(std::io::Error::new(
+            ErrorKind::Unsupported,
+            "writing plugin config in the browser requires a VFS host shim",
+        ))
+    }
 }
 
 fn apply_user_plugin_config_edits_blocking(

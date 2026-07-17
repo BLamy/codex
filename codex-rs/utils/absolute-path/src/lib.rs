@@ -64,7 +64,7 @@ impl AbsolutePathBuf {
     pub fn from_absolute_path_checked<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let expanded = Self::maybe_expand_home_directory(path.as_ref());
         let expanded = normalize_path_for_platform(&expanded);
-        if !expanded.is_absolute() {
+        if !is_absolute_for_platform(&expanded) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("path is not absolute: {}", path.as_ref().display()),
@@ -78,12 +78,24 @@ impl AbsolutePathBuf {
     }
 
     pub fn current_dir() -> std::io::Result<Self> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Self::from_absolute_path_checked(Path::new("/"));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         Self::from_absolute_path(std::env::current_dir()?)
     }
 
     /// Construct an absolute path from `path`, resolving relative paths against
     /// the process current working directory.
     pub fn relative_to_current_dir<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Ok(Self::resolve_path_against_base(path, Path::new("/")));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         Ok(Self::resolve_path_against_base(
             path,
             std::env::current_dir()?,
@@ -95,13 +107,19 @@ impl AbsolutePathBuf {
     }
 
     pub fn canonicalize(&self) -> std::io::Result<Self> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Ok(self.clone());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         dunce::canonicalize(&self.0).map(Self)
     }
 
     pub fn parent(&self) -> Option<Self> {
         self.0.parent().map(|p| {
             debug_assert!(
-                p.is_absolute(),
+                is_absolute_for_platform(p),
                 "parent of AbsolutePathBuf must be absolute"
             );
             Self(p.to_path_buf())
@@ -111,7 +129,7 @@ impl AbsolutePathBuf {
     pub fn ancestors(&self) -> impl Iterator<Item = Self> + '_ {
         self.0.ancestors().map(|p| {
             debug_assert!(
-                p.is_absolute(),
+                is_absolute_for_platform(p),
                 "ancestor of AbsolutePathBuf must be absolute"
             );
             Self(p.to_path_buf())
@@ -148,6 +166,16 @@ fn normalize_path_for_platform(path: &Path) -> Cow<'_, Path> {
     }
 
     Cow::Borrowed(path)
+}
+
+fn is_absolute_for_platform(path: &Path) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return path.to_string_lossy().starts_with('/');
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    path.is_absolute()
 }
 
 fn normalize_windows_device_path(path: &str) -> Option<String> {
@@ -202,12 +230,20 @@ pub fn canonicalize_preserving_symlinks(path: &Path) -> std::io::Result<PathBuf>
 /// Unlike [`canonicalize_preserving_symlinks`], canonicalization failures are
 /// propagated so callers can reject invalid working directories early.
 pub fn canonicalize_existing_preserving_symlinks(path: &Path) -> std::io::Result<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return Ok(AbsolutePathBuf::from_absolute_path(path)?.into_path_buf());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
     let logical = AbsolutePathBuf::from_absolute_path(path)?.into_path_buf();
     let canonical = dunce::canonicalize(path)?;
     if should_preserve_logical_path(&logical) && canonical != logical {
         Ok(logical)
     } else {
         Ok(canonical)
+    }
     }
 }
 
@@ -358,7 +394,7 @@ impl<'de> Deserialize<'de> for AbsolutePathBuf {
         let path = PathBuf::deserialize(deserializer)?;
         ABSOLUTE_PATH_BASE.with(|cell| match cell.borrow().as_deref() {
             Some(base) => Ok(Self::resolve_path_against_base(path, base)),
-            None if path.is_absolute() => {
+            None if is_absolute_for_platform(&path) => {
                 Self::from_absolute_path(path).map_err(SerdeError::custom)
             }
             None => Err(SerdeError::custom(

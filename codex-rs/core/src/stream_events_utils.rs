@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use codex_exec_server::CreateDirectoryOptions;
+use codex_exec_server::LOCAL_FS;
 use codex_extension_api::ExtensionData;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::items::ImageGenerationItem;
@@ -121,9 +123,15 @@ async fn save_image_generation_result(
         })?;
     let path = image_generation_artifact_path(codex_home, session_id, call_id);
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        LOCAL_FS
+            .create_directory(
+                &parent,
+                CreateDirectoryOptions { recursive: true },
+                /*sandbox*/ None,
+            )
+            .await?;
     }
-    tokio::fs::write(&path, bytes).await?;
+    LOCAL_FS.write_file(&path, bytes, /*sandbox*/ None).await?;
     Ok(path)
 }
 
@@ -303,8 +311,11 @@ async fn record_stage1_output_usage_for_memory_citation(
 /// Handle a completed output item from the model stream, recording it and
 /// queuing any tool execution futures. This records items immediately so
 /// history and rollout stay in sync even if the turn is later cancelled.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) type InFlightFuture<'f> =
     Pin<Box<dyn Future<Output = Result<ResponseInputItem>> + Send + 'f>>;
+#[cfg(target_arch = "wasm32")]
+pub(crate) type InFlightFuture<'f> = Pin<Box<dyn Future<Output = Result<ResponseInputItem>> + 'f>>;
 
 #[derive(Default)]
 pub(crate) struct OutputItemResult {
@@ -321,7 +332,7 @@ pub(crate) struct HandleOutputCtx {
     pub cancellation_token: CancellationToken,
 }
 
-async fn apply_turn_item_contributors(
+pub(crate) async fn apply_turn_item_contributors(
     sess: &Session,
     turn_store: &ExtensionData,
     item: &mut TurnItem,
@@ -578,7 +589,9 @@ pub(crate) async fn finalize_turn_item(
             agent_message.memory_citation = memory_citation;
         }
     }
-    if let TurnItem::ImageGeneration(image_item) = &mut *turn_item {
+    if let TurnItem::ImageGeneration(image_item) = &mut *turn_item
+        && !image_item.result.is_empty()
+    {
         persist_image_generation_item(sess, turn_context, image_item).await;
     }
 }
@@ -622,8 +635,10 @@ pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Opti
     match input {
         ResponseInputItem::FunctionCallOutput { call_id, output } => {
             Some(ResponseItem::FunctionCallOutput {
+                id: None,
                 call_id: call_id.clone(),
                 output: output.clone(),
+                internal_chat_message_metadata_passthrough: None,
             })
         }
         ResponseInputItem::CustomToolCallOutput {
@@ -631,15 +646,19 @@ pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Opti
             name,
             output,
         } => Some(ResponseItem::CustomToolCallOutput {
+            id: None,
             call_id: call_id.clone(),
             name: name.clone(),
             output: output.clone(),
+            internal_chat_message_metadata_passthrough: None,
         }),
         ResponseInputItem::McpToolCallOutput { call_id, output } => {
             let output = output.as_function_call_output_payload();
             Some(ResponseItem::FunctionCallOutput {
+                id: None,
                 call_id: call_id.clone(),
                 output,
+                internal_chat_message_metadata_passthrough: None,
             })
         }
         ResponseInputItem::ToolSearchOutput {
@@ -648,10 +667,12 @@ pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Opti
             execution,
             tools,
         } => Some(ResponseItem::ToolSearchOutput {
+            id: None,
             call_id: Some(call_id.clone()),
             status: status.clone(),
             execution: execution.clone(),
             tools: tools.clone(),
+            internal_chat_message_metadata_passthrough: None,
         }),
         _ => None,
     }

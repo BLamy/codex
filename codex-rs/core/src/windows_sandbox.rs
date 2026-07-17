@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Instant;
+use crate::time::Instant;
 
 /// Kill switch for the elevated sandbox NUX on Windows.
 ///

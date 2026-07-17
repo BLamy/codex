@@ -5,25 +5,51 @@ name = "codex-client"
 version.workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
 bytes = { workspace = true }
 eventsource-stream = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 opentelemetry = { workspace = true }
-rand = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls-native-roots", "stream"] }
-rustls = { workspace = true }
-rustls-native-certs = { workspace = true }
-rustls-pki-types = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time", "sync"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 codex-utils-rustls-provider = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true, features = [
+    "json",
+    "rustls-tls-native-roots",
+    "stream",
+] }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+rustls-pki-types = { workspace = true }
 zstd = { workspace = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+system-configuration = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+base64 = { workspace = true }
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-time = "1"
 
 [lints]
 workspace = true

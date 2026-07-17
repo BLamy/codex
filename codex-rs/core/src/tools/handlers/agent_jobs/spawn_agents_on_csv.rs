@@ -6,6 +6,7 @@ use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::agent_jobs_spec::create_spawn_agents_on_csv_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_exec_server::LOCAL_FS;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -14,7 +15,6 @@ use super::*;
 
 pub struct SpawnAgentsOnCsvHandler;
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for SpawnAgentsOnCsvHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("spawn_agents_on_csv")
@@ -24,7 +24,13 @@ impl ToolExecutor<ToolInvocation> for SpawnAgentsOnCsvHandler {
         create_spawn_agents_on_csv_tool()
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl SpawnAgentsOnCsvHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
@@ -77,7 +83,8 @@ pub async fn handle(
     let db = required_state_db(&session)?;
     let input_path = cwd.join(args.csv_path);
     let input_path_display = input_path.display().to_string();
-    let csv_content = tokio::fs::read_to_string(&input_path)
+    let csv_content = LOCAL_FS
+        .read_file_text(&input_path, /*sandbox*/ None)
         .await
         .map_err(|err| {
             FunctionCallError::RespondToModel(format!(
@@ -222,7 +229,7 @@ pub async fn handle(
             FunctionCallError::RespondToModel(format!("agent job {job_id} not found"))
         })?;
     let output_path = PathBuf::from(job.output_csv_path.clone());
-    if !tokio::fs::try_exists(&output_path).await.unwrap_or(false) {
+    if !output_path.exists() {
         export_job_csv_snapshot(db.clone(), &job)
             .await
             .map_err(|err| {
@@ -294,7 +301,7 @@ pub async fn handle(
     Ok(FunctionToolOutput::from_text(content, Some(true)))
 }
 
-fn single_local_environment_cwd(turn: &TurnContext) -> Result<&AbsolutePathBuf, FunctionCallError> {
+fn single_local_environment_cwd(turn: &TurnContext) -> Result<AbsolutePathBuf, FunctionCallError> {
     let [turn_environment] = turn.environments.turn_environments.as_slice() else {
         return Err(FunctionCallError::RespondToModel(
             "spawn_agents_on_csv requires exactly one local environment".to_string(),
@@ -307,5 +314,12 @@ fn single_local_environment_cwd(turn: &TurnContext) -> Result<&AbsolutePathBuf, 
         ));
     }
 
-    Ok(&turn_environment.cwd)
+    // TODO(anp): Migrate spawn_agents_on_csv filesystem access to PathUri before enabling it for
+    // remote environments.
+    turn_environment.cwd().to_abs_path().map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "spawn_agents_on_csv cwd `{}` is not native to the Codex host: {err}",
+            turn_environment.cwd()
+        ))
+    })
 }

@@ -1,19 +1,30 @@
-#[cfg(unix)]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 use dns_lookup::AddrInfoHints;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 use dns_lookup::getaddrinfo;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::LazyLock;
 #[cfg(windows)]
 use winapi_util::sysinfo::ComputerNameKind;
 #[cfg(windows)]
 use winapi_util::sysinfo::get_computer_name;
 
+#[cfg(not(target_arch = "wasm32"))]
 static HOST_NAME: LazyLock<Option<String>> = LazyLock::new(compute_host_name);
 
+/// Returns a process-cached canonical hostname, falling back to the normalized
+/// kernel hostname. The first call on Unix may perform blocking DNS resolution.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn host_name() -> Option<String> {
     HOST_NAME.clone()
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn host_name() -> Option<String> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn compute_host_name() -> Option<String> {
     let kernel_hostname = gethostname::gethostname();
     let kernel_hostname = normalize_host_name(&kernel_hostname.to_string_lossy())?;
@@ -36,7 +47,7 @@ fn normalize_host_name(hostname: &str) -> Option<String> {
     (!hostname.is_empty()).then(|| hostname.to_ascii_lowercase())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 fn local_fqdn_for_hostname(hostname: &str) -> Option<String> {
     let hints = AddrInfoHints {
         flags: libc::AI_CANONNAME,

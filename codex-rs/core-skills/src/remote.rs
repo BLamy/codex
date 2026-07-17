@@ -1,7 +1,9 @@
 use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Component;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -144,52 +146,64 @@ pub async fn export_remote_skill(
     auth: Option<&CodexAuth>,
     skill_id: &str,
 ) -> Result<RemoteSkillDownloadResult> {
-    let auth = ensure_codex_backend_auth(auth)?;
-
-    let client = build_reqwest_client();
-    let base_url = chatgpt_base_url.trim_end_matches('/');
-    let url = format!("{base_url}/hazelnuts/{skill_id}/export");
-    let request = client
-        .get(&url)
-        .timeout(REMOTE_SKILLS_API_TIMEOUT)
-        .headers(codex_model_provider::auth_provider_from_auth(auth).to_auth_headers());
-
-    let response = request
-        .send()
-        .await
-        .with_context(|| format!("Failed to send download request to {url}"))?;
-
-    let status = response.status();
-    let body = response.bytes().await.context("Failed to read download")?;
-    if !status.is_success() {
-        let body_text = String::from_utf8_lossy(&body);
-        anyhow::bail!("Download failed with status {status} from {url}: {body_text}");
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (chatgpt_base_url, codex_home, auth, skill_id);
+        anyhow::bail!(
+            "browser remote skill export requires an almostnode storage and zip host shim"
+        );
     }
 
-    if !is_zip_payload(&body) {
-        anyhow::bail!("Downloaded remote skill payload is not a zip archive");
-    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let auth = ensure_codex_backend_auth(auth)?;
 
-    let output_dir = codex_home.join("skills").join(skill_id);
-    tokio::fs::create_dir_all(&output_dir)
+        let client = build_reqwest_client();
+        let base_url = chatgpt_base_url.trim_end_matches('/');
+        let url = format!("{base_url}/hazelnuts/{skill_id}/export");
+        let request = client
+            .get(&url)
+            .timeout(REMOTE_SKILLS_API_TIMEOUT)
+            .headers(codex_model_provider::auth_provider_from_auth(auth).to_auth_headers());
+
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("Failed to send download request to {url}"))?;
+
+        let status = response.status();
+        let body = response.bytes().await.context("Failed to read download")?;
+        if !status.is_success() {
+            let body_text = String::from_utf8_lossy(&body);
+            anyhow::bail!("Download failed with status {status} from {url}: {body_text}");
+        }
+
+        if !is_zip_payload(&body) {
+            anyhow::bail!("Downloaded remote skill payload is not a zip archive");
+        }
+
+        let output_dir = codex_home.join("skills").join(skill_id);
+        tokio::fs::create_dir_all(&output_dir)
+            .await
+            .context("Failed to create downloaded skills directory")?;
+
+        let zip_bytes = body.to_vec();
+        let output_dir_clone = output_dir.clone();
+        let prefix_candidates = vec![skill_id.to_string()];
+        tokio::task::spawn_blocking(move || {
+            extract_zip_to_dir(zip_bytes, &output_dir_clone, &prefix_candidates)
+        })
         .await
-        .context("Failed to create downloaded skills directory")?;
+        .context("Zip extraction task failed")??;
 
-    let zip_bytes = body.to_vec();
-    let output_dir_clone = output_dir.clone();
-    let prefix_candidates = vec![skill_id.to_string()];
-    tokio::task::spawn_blocking(move || {
-        extract_zip_to_dir(zip_bytes, &output_dir_clone, &prefix_candidates)
-    })
-    .await
-    .context("Zip extraction task failed")??;
-
-    Ok(RemoteSkillDownloadResult {
-        id: skill_id.to_string(),
-        path: output_dir,
-    })
+        Ok(RemoteSkillDownloadResult {
+            id: skill_id.to_string(),
+            path: output_dir,
+        })
+    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn safe_join(base: &Path, name: &str) -> Result<PathBuf> {
     let path = Path::new(name);
     for component in path.components() {
@@ -203,12 +217,14 @@ fn safe_join(base: &Path, name: &str) -> Result<PathBuf> {
     Ok(base.join(path))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_zip_payload(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04")
         || bytes.starts_with(b"PK\x05\x06")
         || bytes.starts_with(b"PK\x07\x08")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_zip_to_dir(
     bytes: Vec<u8>,
     output_dir: &Path,
@@ -239,6 +255,7 @@ fn extract_zip_to_dir(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn normalize_zip_name(name: &str, prefix_candidates: &[String]) -> Option<String> {
     let mut trimmed = name.trim_start_matches("./");
     for prefix in prefix_candidates {

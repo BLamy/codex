@@ -17,9 +17,19 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+default = []
+real-tui-wasm = ["codex-tui/real-tui-wasm"]
+
 [dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+codex-protocol = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+codex-tui = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
 codex-app-server = { workspace = true }
 codex-app-server-daemon = { workspace = true }
@@ -33,6 +43,7 @@ codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
 codex-core-plugins = { workspace = true }
+codex-home = { workspace = true }
 codex-exec = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-execpolicy = { workspace = true }
@@ -46,7 +57,6 @@ codex-mcp-server = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-plugin = { workspace = true }
-codex-protocol = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
 codex-rmcp-client = { workspace = true }
 codex-rollout = { workspace = true }
@@ -94,6 +104,7 @@ windows-sys = { version = "0.52", features = [
 ] }
 
 [dev-dependencies]
+app_test_support = { workspace = true }
 assert_cmd = { workspace = true }
 assert_matches = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }
@@ -101,3 +112,4 @@ insta = { workspace = true }
 predicates = { workspace = true }
 pretty_assertions = { workspace = true }
 sqlx = { workspace = true }
+wiremock = { workspace = true }

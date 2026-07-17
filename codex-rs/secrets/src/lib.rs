@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use codex_git_utils::get_git_repo_root;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_keyring_store::DefaultKeyringStore;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_keyring_store::KeyringStore;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,12 +15,16 @@ use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod local;
 mod sanitizer;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use local::LocalSecretsBackend;
+pub use local::LocalSecretsNamespace;
 pub use sanitizer::redact_secrets;
 
+#[cfg(not(target_arch = "wasm32"))]
 const KEYRING_SERVICE: &str = "codex";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,15 +106,27 @@ pub struct SecretsManager {
 
 impl SecretsManager {
     pub fn new(codex_home: PathBuf, backend_kind: SecretsBackendKind) -> Self {
-        let backend: Arc<dyn SecretsBackend> = match backend_kind {
-            SecretsBackendKind::Local => {
-                let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
-                Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (codex_home, backend_kind);
+            Self {
+                backend: Arc::new(UnsupportedSecretsBackend),
             }
-        };
-        Self { backend }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let backend: Arc<dyn SecretsBackend> = match backend_kind {
+                SecretsBackendKind::Local => {
+                    let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+                    Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
+                }
+            };
+            Self { backend }
+        }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_with_keyring_store(
         codex_home: PathBuf,
         backend_kind: SecretsBackendKind,
@@ -118,6 +136,22 @@ impl SecretsManager {
             SecretsBackendKind::Local => {
                 Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
             }
+        };
+        Self { backend }
+    }
+
+    pub fn new_with_keyring_store_and_namespace(
+        codex_home: PathBuf,
+        backend_kind: SecretsBackendKind,
+        keyring_store: Arc<dyn KeyringStore>,
+        namespace: LocalSecretsNamespace,
+    ) -> Self {
+        let backend: Arc<dyn SecretsBackend> = match backend_kind {
+            SecretsBackendKind::Local => Arc::new(LocalSecretsBackend::new_with_namespace(
+                codex_home,
+                keyring_store,
+                namespace,
+            )),
         };
         Self { backend }
     }
@@ -136,6 +170,36 @@ impl SecretsManager {
 
     pub fn list(&self, scope_filter: Option<&SecretScope>) -> Result<Vec<SecretListEntry>> {
         self.backend.list(scope_filter)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct UnsupportedSecretsBackend;
+
+#[cfg(target_arch = "wasm32")]
+impl SecretsBackend for UnsupportedSecretsBackend {
+    fn set(&self, _scope: &SecretScope, _name: &SecretName, _value: &str) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "local encrypted secret storage is not available in the browser runtime"
+        ))
+    }
+
+    fn get(&self, _scope: &SecretScope, _name: &SecretName) -> Result<Option<String>> {
+        Err(anyhow::anyhow!(
+            "local encrypted secret storage is not available in the browser runtime"
+        ))
+    }
+
+    fn delete(&self, _scope: &SecretScope, _name: &SecretName) -> Result<bool> {
+        Err(anyhow::anyhow!(
+            "local encrypted secret storage is not available in the browser runtime"
+        ))
+    }
+
+    fn list(&self, _scope_filter: Option<&SecretScope>) -> Result<Vec<SecretListEntry>> {
+        Err(anyhow::anyhow!(
+            "local encrypted secret storage is not available in the browser runtime"
+        ))
     }
 }
 
@@ -162,7 +226,9 @@ pub fn environment_id_from_cwd(cwd: &Path) -> String {
     format!("cwd-{short}")
 }
 
-pub(crate) fn compute_keyring_account(codex_home: &Path) -> String {
+#[cfg(not(target_arch = "wasm32"))]
+/// Computes the OS keyring account name used to store the local secrets passphrase.
+pub fn compute_keyring_account(codex_home: &Path) -> String {
     let canonical = codex_home
         .canonicalize()
         .unwrap_or_else(|_| codex_home.to_path_buf())
@@ -176,6 +242,7 @@ pub(crate) fn compute_keyring_account(codex_home: &Path) -> String {
     format!("secrets|{short}")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn keyring_service() -> &'static str {
     KEYRING_SERVICE
 }

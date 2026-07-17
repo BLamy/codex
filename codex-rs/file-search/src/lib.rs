@@ -25,6 +25,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 
 #[cfg(test)]
@@ -654,7 +655,10 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::thread;
     use std::time::Duration;
-    use std::time::Instant;
+    #[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
     use tempfile::TempDir;
 
     #[test]

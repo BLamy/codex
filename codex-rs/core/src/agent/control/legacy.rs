@@ -19,6 +19,7 @@ impl AgentControl {
             state.send_op(agent_id, Op::Shutdown {}).await
         };
         let _ = state.remove_thread(&agent_id).await;
+        self.forget_v2_residency(agent_id);
         self.state.release_spawned_thread(agent_id);
         result
     }
@@ -30,11 +31,12 @@ impl AgentControl {
         let known_agent = self.state.agent_metadata_for_thread(agent_id).is_some();
         match state.get_thread(agent_id).await {
             Ok(thread) => {
-                if let Some(state_db_ctx) = thread.state_db()
-                    && let Err(err) = state_db_ctx
+                if !thread.config_snapshot().await.ephemeral
+                    && let Some(agent_graph_store) = state.agent_graph_store()
+                    && let Err(err) = agent_graph_store
                         .set_thread_spawn_edge_status(
                             agent_id,
-                            DirectionalThreadSpawnEdgeStatus::Closed,
+                            codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
                         )
                         .await
                 {
@@ -42,11 +44,11 @@ impl AgentControl {
                 }
             }
             Err(CodexErr::ThreadNotFound(_)) if known_agent => {
-                if let Some(state_db_ctx) = state.state_db()
-                    && let Err(err) = state_db_ctx
+                if let Some(agent_graph_store) = state.agent_graph_store()
+                    && let Err(err) = agent_graph_store
                         .set_thread_spawn_edge_status(
                             agent_id,
-                            DirectionalThreadSpawnEdgeStatus::Closed,
+                            codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
                         )
                         .await
                 {

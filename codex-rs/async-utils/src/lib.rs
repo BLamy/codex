@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::future::Future;
 use tokio_util::sync::CancellationToken;
 
@@ -7,18 +6,36 @@ pub enum CancelErr {
     Cancelled,
 }
 
-#[async_trait]
 pub trait OrCancelExt: Sized {
     type Output;
 
-    async fn or_cancel(self, token: &CancellationToken) -> Result<Self::Output, CancelErr>;
+    fn or_cancel(
+        self,
+        token: &CancellationToken,
+    ) -> impl Future<Output = Result<Self::Output, CancelErr>> + Send;
 }
 
-#[async_trait]
+#[cfg(not(target_arch = "wasm32"))]
 impl<F> OrCancelExt for F
 where
     F: Future + Send,
     F::Output: Send,
+{
+    type Output = F::Output;
+
+    async fn or_cancel(self, token: &CancellationToken) -> Result<Self::Output, CancelErr> {
+        tokio::select! {
+            _ = token.cancelled() => Err(CancelErr::Cancelled),
+            res = self => Ok(res),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[async_trait(?Send)]
+impl<F> OrCancelExt for F
+where
+    F: Future,
 {
     type Output = F::Output;
 
