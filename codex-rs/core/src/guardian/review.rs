@@ -228,10 +228,11 @@ async fn record_guardian_denial(session: &Arc<Session>, turn: &Arc<TurnContext>,
         )
         .await;
 
+    #[cfg(not(target_arch = "wasm32"))]
     let runtime_handle = session.services.runtime_handle.clone();
     let session = Arc::clone(session);
     let turn_id = turn_id.to_string();
-    let _abort_task = runtime_handle.spawn(async move {
+    let abort_task = async move {
         let aborted = session
             .abort_turn_if_active(&turn_id, TurnAbortReason::Interrupted)
             .await;
@@ -240,7 +241,11 @@ async fn record_guardian_denial(session: &Arc<Session>, turn: &Arc<TurnContext>,
             // User interrupts deliberately do not take this path.
             session.emit_thread_idle_lifecycle_if_idle().await;
         }
-    });
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let _abort_task = runtime_handle.spawn(abort_task);
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(abort_task);
 }
 
 #[cfg(test)]

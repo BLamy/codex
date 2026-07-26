@@ -2165,6 +2165,7 @@ fn expand_local_link_path(path_text: &str) -> String {
 /// encodings, we reconstruct a display path from the host/path parts so UNC paths and drive-letter
 /// URLs still render sensibly.
 fn file_url_to_local_path_text(url: &Url) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
     if let Ok(path) = url.to_file_path() {
         return Some(normalize_local_link_path_text(&path.to_string_lossy()));
     }

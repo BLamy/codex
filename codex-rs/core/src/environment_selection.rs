@@ -169,6 +169,9 @@ impl ThreadEnvironments {
                 self.shell_snapshot.clone(),
             )
             .remote_handle();
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(resolution_task);
+            #[cfg(not(target_arch = "wasm32"))]
             drop(tokio::spawn(resolution_task));
             let resolution = resolution.boxed().shared();
             next.push(SelectedTurnEnvironment {
@@ -202,43 +205,51 @@ impl ThreadEnvironments {
         environment_id: String,
         tx_event: Sender<Event>,
     ) -> Option<Arc<AbortOnDropHandle<()>>> {
-        let mut connection_state = environment.subscribe_connection_state()?;
-        let task = tokio::spawn(async move {
-            loop {
-                let state = tokio::select! {
-                    _ = tx_event.closed() => return,
-                    changed = connection_state.changed() => {
-                        if changed.is_err() {
-                            return;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (environment, environment_id, tx_event);
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut connection_state = environment.subscribe_connection_state()?;
+            let task = tokio::spawn(async move {
+                loop {
+                    let state = tokio::select! {
+                        _ = tx_event.closed() => return,
+                        changed = connection_state.changed() => {
+                            if changed.is_err() {
+                                return;
+                            }
+                            *connection_state.borrow_and_update()
                         }
-                        *connection_state.borrow_and_update()
-                    }
-                };
-                let msg = match state {
-                    EnvironmentConnectionState::Connected => {
-                        EventMsg::EnvironmentConnected(EnvironmentConnectionEvent {
-                            environment_id: environment_id.clone(),
+                    };
+                    let msg = match state {
+                        EnvironmentConnectionState::Connected => {
+                            EventMsg::EnvironmentConnected(EnvironmentConnectionEvent {
+                                environment_id: environment_id.clone(),
+                            })
+                        }
+                        EnvironmentConnectionState::Disconnected => {
+                            EventMsg::EnvironmentDisconnected(EnvironmentConnectionEvent {
+                                environment_id: environment_id.clone(),
+                            })
+                        }
+                    };
+                    if tx_event
+                        .send(Event {
+                            id: String::new(),
+                            msg,
                         })
+                        .await
+                        .is_err()
+                    {
+                        return;
                     }
-                    EnvironmentConnectionState::Disconnected => {
-                        EventMsg::EnvironmentDisconnected(EnvironmentConnectionEvent {
-                            environment_id: environment_id.clone(),
-                        })
-                    }
-                };
-                if tx_event
-                    .send(Event {
-                        id: String::new(),
-                        msg,
-                    })
-                    .await
-                    .is_err()
-                {
-                    return;
                 }
-            }
-        });
-        Some(Arc::new(AbortOnDropHandle::new(task)))
+            });
+            Some(Arc::new(AbortOnDropHandle::new(task)))
+        }
     }
 
     pub(crate) fn start_connection_event_forwarding(&self, tx_event: Sender<Event>) {
@@ -305,6 +316,14 @@ impl ThreadEnvironments {
                 .build(turn_environment.clone())
                 .boxed()
                 .shared();
+            #[cfg(target_arch = "wasm32")]
+            {
+                let task = task.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = task.await;
+                });
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             drop(tokio::spawn(task.clone()));
             turn_environment.shell_snapshot = task;
             Ok(turn_environment)

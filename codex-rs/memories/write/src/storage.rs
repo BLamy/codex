@@ -51,7 +51,7 @@ async fn rebuild_raw_memories_file(
 
     if retained.is_empty() {
         body.push_str("No raw memories yet.\n");
-        return tokio::fs::write(raw_memories_file(root), body).await;
+        return crate::fs::write(raw_memories_file(root), body).await;
     }
 
     body.push_str("Merged stage-1 raw memories (stable ascending thread-id order):\n\n");
@@ -74,12 +74,12 @@ async fn rebuild_raw_memories_file(
         body.push_str("\n\n");
     }
 
-    tokio::fs::write(raw_memories_file(root), body).await
+    crate::fs::write(raw_memories_file(root), body).await
 }
 
 async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io::Result<()> {
     let dir_path = rollout_summaries_dir(root);
-    let mut dir = match tokio::fs::read_dir(&dir_path).await {
+    let mut dir = match crate::fs::read_dir(&dir_path).await {
         Ok(dir) => dir,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(err),
@@ -94,7 +94,7 @@ async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io
             continue;
         };
         if !keep.contains(stem)
-            && let Err(err) = tokio::fs::remove_file(&path).await
+            && let Err(err) = crate::fs::remove_file(&path).await
             && err.kind() != std::io::ErrorKind::NotFound
         {
             warn!(
@@ -132,7 +132,7 @@ async fn write_rollout_summary_for_thread(
     body.push_str(&memory.rollout_summary);
     body.push('\n');
 
-    tokio::fs::write(path, body).await
+    crate::fs::write(path, body).await
 }
 
 fn retained_memories(

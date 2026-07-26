@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use codex_utils_string::take_bytes_at_char_boundary;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing_appender::rolling::RollingFileAppender;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing_appender::rolling::Rotation;
 
 const LOG_COMMAND_PREVIEW_LIMIT: usize = 200;
@@ -47,6 +49,7 @@ pub fn current_log_file_path_for_codex_home(codex_home: &Path) -> PathBuf {
     current_log_file_path(&crate::sandbox_dir(codex_home))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn log_writer(base_dir: &Path) -> Option<RollingFileAppender> {
     if !base_dir.is_dir() {
         return None;
@@ -61,6 +64,7 @@ pub fn log_writer(base_dir: &Path) -> Option<RollingFileAppender> {
         .ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn append_line(line: &str, base_dir: Option<&Path>) {
     if let Some(dir) = base_dir
         && let Some(mut f) = log_writer(dir)
@@ -68,6 +72,10 @@ fn append_line(line: &str, base_dir: Option<&Path>) {
         let _ = writeln!(f, "{line}");
     }
 }
+
+// wasm has no filesystem; sandbox file logging is a no-op.
+#[cfg(target_arch = "wasm32")]
+fn append_line(_line: &str, _base_dir: Option<&Path>) {}
 
 pub fn log_start(command: &[String], base_dir: Option<&Path>) {
     let p = preview(command);

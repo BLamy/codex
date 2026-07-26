@@ -199,6 +199,7 @@ pub(crate) mod announcement {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn init_announcement_tip_in_thread() -> Option<String> {
         thread::spawn(blocking_init_announcement_tip)
             .join()
@@ -206,6 +207,12 @@ pub(crate) mod announcement {
             .flatten()
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn init_announcement_tip_in_thread() -> Option<String> {
+        None
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn blocking_init_announcement_tip() -> Option<String> {
         // Avoid system proxy detection to prevent macOS system-configuration panics (#8912).
         let client = reqwest::blocking::Client::builder()

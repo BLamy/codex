@@ -3,6 +3,10 @@ mod declarations;
 mod engine;
 pub(crate) mod events;
 mod legacy_notify;
+#[cfg(not(target_arch = "wasm32"))]
+mod output_spill;
+#[cfg(target_arch = "wasm32")]
+#[path = "output_spill_wasm.rs"]
 mod output_spill;
 mod registry;
 mod schema;

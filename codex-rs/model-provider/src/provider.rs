@@ -17,6 +17,7 @@ use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
@@ -188,8 +189,31 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
                 return self.api_auth().await.map(ResolvedProviderAuth::new);
             }
             let auth = self.auth().await;
-            resolve_provider_auth_for_scope(self.auth_manager(), auth.as_ref(), self.info(), scope)
-                .await
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                return resolve_provider_auth_for_scope(
+                    self.auth_manager(),
+                    auth.as_ref(),
+                    self.info(),
+                    scope,
+                )
+                .await;
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let auth_manager = self.auth_manager();
+                let provider_info = self.info().clone();
+                return bridge_local_model_provider_result(async move {
+                    resolve_provider_auth_for_scope(
+                        auth_manager,
+                        auth.as_ref(),
+                        &provider_info,
+                        scope,
+                    )
+                    .await
+                })
+                .await;
+            }
         })
     }
 
@@ -217,6 +241,43 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
 
 pub type ModelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+#[cfg(target_arch = "wasm32")]
+fn bridge_local_model_provider_future<T, F>(
+    future: F,
+    cancelled: impl FnOnce() -> T + Send + 'static,
+) -> ModelProviderFuture<'static, T>
+where
+    T: Send + 'static,
+    F: Future<Output = T> + 'static,
+{
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = sender.send(future.await);
+    });
+    Box::pin(async move {
+        match receiver.await {
+            Ok(value) => value,
+            Err(_) => cancelled(),
+        }
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bridge_local_model_provider_result<T, F>(
+    future: F,
+) -> ModelProviderFuture<'static, codex_protocol::error::Result<T>>
+where
+    T: Send + 'static,
+    F: Future<Output = codex_protocol::error::Result<T>> + 'static,
+{
+    bridge_local_model_provider_future(future, || {
+        Err(CodexErr::Io(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "browser model provider task was cancelled",
+        )))
+    })
+}
+
 /// Shared runtime model provider handle.
 pub type SharedModelProvider = Arc<dyn ModelProvider>;
 
@@ -233,9 +294,19 @@ pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> SharedModelProvider {
+    #[cfg(not(target_arch = "wasm32"))]
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager))
     } else {
+        Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        if provider_info.is_amazon_bedrock() {
+            tracing::warn!(
+                "Amazon Bedrock provider requested in wasm32; AWS SDK auth is not available"
+            );
+        }
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }
 }
@@ -274,12 +345,28 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
-        Box::pin(async move {
-            match self.auth_manager.as_ref() {
-                Some(auth_manager) => auth_manager.auth().await,
-                None => None,
-            }
-        })
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Box::pin(async move {
+                match self.auth_manager.as_ref() {
+                    Some(auth_manager) => auth_manager.auth().await,
+                    None => None,
+                }
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let auth_manager = self.auth_manager.clone();
+            bridge_local_model_provider_future(
+                async move {
+                    match auth_manager {
+                        Some(auth_manager) => auth_manager.auth().await,
+                        None => None,
+                    }
+                },
+                || None,
+            )
+        }
     }
 
     fn account_state(&self) -> ProviderAccountResult {

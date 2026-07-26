@@ -6,6 +6,7 @@ use crate::catalog::SkillCatalog;
 use crate::catalog::SkillCatalogEntry;
 use crate::catalog::SkillPackageId;
 use crate::catalog::SkillProviderError;
+use crate::catalog::SkillProviderResult;
 use crate::catalog::SkillReadResult;
 use crate::catalog::SkillResourceId;
 use crate::catalog::SkillSearchResult;
@@ -15,6 +16,8 @@ use crate::provider::SkillProvider;
 use crate::provider::SkillProviderFuture;
 use crate::provider::SkillReadRequest;
 use crate::provider::SkillSearchRequest;
+#[cfg(target_arch = "wasm32")]
+use crate::provider::bridge_local_provider_future;
 
 const HOST_AUTHORITY_ID: &str = "host";
 
@@ -28,6 +31,36 @@ pub struct HostSkillProvider;
 impl HostSkillProvider {
     pub fn new() -> Self {
         Self
+    }
+
+    async fn read_inner(&self, request: SkillReadRequest) -> SkillProviderResult<SkillReadResult> {
+        let Some(host_snapshot) = request.host_snapshot else {
+            return Err(SkillProviderError::new(
+                "host skill provider requires a host skills snapshot",
+            ));
+        };
+        let Some(skill) = host_snapshot.outcome().skills.iter().find(|skill| {
+            let skill_path = skill.path_to_skills_md.to_string_lossy();
+            skill_path == request.resource.as_str()
+                || skill_path.replace('\\', "/") == request.resource.as_str()
+        }) else {
+            return Err(SkillProviderError::new(format!(
+                "host skill resource is not loaded: {}",
+                request.resource.as_str()
+            )));
+        };
+
+        let contents = host_snapshot.read_skill_text(skill).await.map_err(|err| {
+            SkillProviderError::new(format!(
+                "failed to read host skill resource {}: {err}",
+                request.resource.as_str()
+            ))
+        })?;
+
+        Ok(SkillReadResult {
+            resource: request.resource,
+            contents,
+        })
     }
 }
 
@@ -45,35 +78,15 @@ impl SkillProvider for HostSkillProvider {
     }
 
     fn read(&self, request: SkillReadRequest) -> SkillProviderFuture<'_, SkillReadResult> {
-        Box::pin(async move {
-            let Some(host_snapshot) = request.host_snapshot else {
-                return Err(SkillProviderError::new(
-                    "host skill provider requires a host skills snapshot",
-                ));
-            };
-            let Some(skill) = host_snapshot.outcome().skills.iter().find(|skill| {
-                let skill_path = skill.path_to_skills_md.to_string_lossy();
-                skill_path == request.resource.as_str()
-                    || skill_path.replace('\\', "/") == request.resource.as_str()
-            }) else {
-                return Err(SkillProviderError::new(format!(
-                    "host skill resource is not loaded: {}",
-                    request.resource.as_str()
-                )));
-            };
-
-            let contents = host_snapshot.read_skill_text(skill).await.map_err(|err| {
-                SkillProviderError::new(format!(
-                    "failed to read host skill resource {}: {err}",
-                    request.resource.as_str()
-                ))
-            })?;
-
-            Ok(SkillReadResult {
-                resource: request.resource,
-                contents,
-            })
-        })
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Box::pin(self.read_inner(request))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let provider = self.clone();
+            bridge_local_provider_future(async move { provider.read_inner(request).await })
+        }
     }
 
     fn search(&self, _request: SkillSearchRequest) -> SkillProviderFuture<'_, SkillSearchResult> {

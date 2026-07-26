@@ -111,6 +111,9 @@ fn guardian_cwd(environment_id: &str, cwd: PathUri) -> std::io::Result<AbsoluteP
     match cwd.to_abs_path() {
         Ok(cwd) => Ok(cwd),
         Err(err) if environment_id != codex_exec_server::LOCAL_ENVIRONMENT_ID => Err(err),
+        #[cfg(target_arch = "wasm32")]
+        Err(err) => Err(err),
+        #[cfg(not(target_arch = "wasm32"))]
         Err(_) => {
             let cwd_display = cwd.to_string();
             let path = cwd.to_url().to_file_path().map_err(|()| {

@@ -120,6 +120,62 @@ pub async fn upload_openai_file(
     file_size_bytes: u64,
     contents: impl Stream<Item = std::io::Result<Bytes>> + Send + 'static,
 ) -> Result<UploadedOpenAiFile, OpenAiFileError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        upload_openai_file_local(
+            base_url,
+            auth,
+            http_client_factory,
+            file_name,
+            file_size_bytes,
+            contents,
+        )
+        .await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let base_url = base_url.to_string();
+        let auth = OwnedAuthHeaders(auth.to_auth_headers());
+        let http_client_factory = http_client_factory.clone();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = upload_openai_file_local(
+                &base_url,
+                &auth,
+                &http_client_factory,
+                file_name,
+                file_size_bytes,
+                contents,
+            )
+            .await;
+            let _ = sender.send(result);
+        });
+        receiver.await.map_err(|_| OpenAiFileError::UploadFailed {
+            file_id: "<pending>".to_string(),
+            message: "browser upload task ended before producing a result".to_string(),
+        })?
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct OwnedAuthHeaders(http::HeaderMap);
+
+#[cfg(target_arch = "wasm32")]
+impl AuthProvider for OwnedAuthHeaders {
+    fn add_auth_headers(&self, headers: &mut http::HeaderMap) {
+        headers.extend(self.0.clone());
+    }
+}
+
+async fn upload_openai_file_local(
+    base_url: &str,
+    auth: &dyn AuthProvider,
+    http_client_factory: &HttpClientFactory,
+    file_name: String,
+    file_size_bytes: u64,
+    contents: impl Stream<Item = std::io::Result<Bytes>> + Send + 'static,
+) -> Result<UploadedOpenAiFile, OpenAiFileError> {
     if file_size_bytes > OPENAI_FILE_UPLOAD_LIMIT_BYTES {
         return Err(OpenAiFileError::FileTooLarge {
             file_name,
@@ -167,6 +223,9 @@ pub async fn upload_openai_file(
         .unwrap_or_else(|| "unknown-host".to_string());
     let azure_client_request_id = Uuid::new_v4().to_string();
     let upload_started_at = Instant::now();
+    // wasm reqwest has no streaming `Body::wrap_stream` or `timeout`; buffer the
+    // upload body and send it non-streamed there.
+    #[cfg(not(target_arch = "wasm32"))]
     let upload_response = build_reqwest_client(http_client_factory, &create_payload.upload_url)?
         .put(&create_payload.upload_url)
         .timeout(OPENAI_FILE_REQUEST_TIMEOUT)
@@ -209,6 +268,46 @@ pub async fn upload_openai_file(
                 source: source.without_url(),
             }
         })?;
+    #[cfg(target_arch = "wasm32")]
+    let upload_response = {
+        use futures::StreamExt;
+        let mut body_bytes: Vec<u8> = Vec::new();
+        let mut stream = std::pin::pin!(contents);
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| OpenAiFileError::UploadFailed {
+                file_id: create_payload.file_id.clone(),
+                message: format!("failed to read upload body: {err}"),
+            })?;
+            body_bytes.extend_from_slice(&chunk);
+        }
+        build_reqwest_client(http_client_factory, &create_payload.upload_url)?
+            .put(&create_payload.upload_url)
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-client-request-id", &azure_client_request_id)
+            .header(CONTENT_LENGTH, file_size_bytes)
+            .body(body_bytes)
+            .send()
+            .await
+            .map_err(|source| {
+                let elapsed_ms = upload_started_at.elapsed().as_millis();
+                let error_kind = if source.is_timeout() {
+                    "timeout"
+                } else if source.is_body() {
+                    "body"
+                } else if source.is_request() {
+                    "request"
+                } else {
+                    "other"
+                };
+                OpenAiFileError::BlobUploadRequest {
+                    host: upload_host.clone(),
+                    elapsed_ms,
+                    error_kind,
+                    azure_client_request_id: azure_client_request_id.clone(),
+                    source: source.without_url(),
+                }
+            })?
+    };
     let upload_status = upload_response.status();
     let cloudflare_ray_id = upload_response_header(&upload_response, "cf-ray");
     let azure_request_id = upload_response_header(&upload_response, "x-ms-request-id");

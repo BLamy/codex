@@ -90,7 +90,7 @@ impl LocalMemoriesBackend {
     async fn metadata_or_none(
         path: &Path,
     ) -> Result<Option<std::fs::Metadata>, MemoriesBackendError> {
-        match tokio::fs::symlink_metadata(path).await {
+        match crate::fs::symlink_metadata(path).await {
             Ok(metadata) => Ok(Some(metadata)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(err) => Err(err.into()),

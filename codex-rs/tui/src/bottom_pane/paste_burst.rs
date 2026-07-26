@@ -146,8 +146,11 @@
 //!   [`PasteBurst::clear_window_after_non_char`] to prevent the next keystroke from being
 //!   incorrectly grouped into a previous burst.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::time::Instant;
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 // Heuristic thresholds for detecting paste-like input bursts.
 // Detect quickly to avoid showing typed prefix before paste is recognized

@@ -1,6 +1,7 @@
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
+use crate::time::Instant;
 use std::collections::HashMap;
 use std::io;
 #[cfg(target_os = "windows")]
@@ -8,21 +9,35 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::time::Duration;
-use std::time::Instant;
 
 use async_channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncRead;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::BufReader;
-use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
 
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::SandboxPermissions;
+use crate::spawn::Child;
 use crate::spawn::SpawnChildRequest;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecBackend;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecOutputStream as HostExecOutputStream;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecParams as HostExecParams;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ExecProcessEvent;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LocalProcess;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::ProcessId;
 use codex_network_proxy::NetworkProxy;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
@@ -53,6 +68,7 @@ use codex_sandboxing::windows_sandbox_uses_elevated_backend;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_pty::process_group::kill_child_process_group;
 
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
@@ -256,13 +272,17 @@ pub(crate) fn cancel_when_either(
 ) -> CancellationToken {
     let combined = CancellationToken::new();
     let cancel = combined.clone();
-    tokio::spawn(async move {
+    let cancellation_task = async move {
         tokio::select! {
             _ = first.cancelled() => {}
             _ = second.cancelled() => {}
         }
         cancel.cancel();
-    });
+    };
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(cancellation_task);
+    #[cfg(not(target_arch = "wasm32"))]
+    drop(tokio::spawn(cancellation_task));
     combined
 }
 
@@ -532,7 +552,176 @@ async fn get_raw_output_result(
         .await;
     }
 
-    exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
+    #[cfg(target_arch = "wasm32")]
+    {
+        return exec_wasm_host(params, network_sandbox_policy, stdout_stream, after_spawn).await;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn exec_wasm_host(
+    params: ExecParams,
+    network_sandbox_policy: NetworkSandboxPolicy,
+    stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+) -> Result<RawExecToolCallOutput> {
+    let ExecParams {
+        command,
+        cwd,
+        mut env,
+        network,
+        network_environment_id,
+        arg0,
+        expiration,
+        capture_policy,
+
+        // If applicable, these fields should have been honored upstream of
+        // this exec call.
+        windows_sandbox_level: _,
+        windows_sandbox_private_desktop: _,
+        // These fields are related to approvals, so can be ignored here.
+        sandbox_permissions: _,
+        justification: _,
+    } = params;
+
+    if command.is_empty() {
+        return Err(CodexErr::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "command args are empty",
+        )));
+    }
+
+    if let Some(network) = network.as_ref() {
+        network
+            .apply_to_env_for_optional_environment(&mut env, network_environment_id.as_deref())
+            .map_err(|err| {
+                network_proxy_environment_error(network_environment_id.as_deref(), err)
+            })?;
+    }
+    if !network_sandbox_policy.is_enabled() {
+        env.insert(
+            crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
+            "1".to_string(),
+        );
+    }
+
+    let process_id = ProcessId::new(uuid::Uuid::new_v4().to_string());
+    let backend = LocalProcess::default();
+    let started = backend
+        .start(HostExecParams {
+            process_id,
+            argv: command,
+            cwd: PathUri::from_abs_path(&cwd),
+            env_policy: None,
+            env,
+            tty: false,
+            pipe_stdin: false,
+            arg0,
+            sandbox: None,
+            enforce_managed_network: network.is_some(),
+            managed_network: None,
+            network_proxy: None,
+        })
+        .await
+        .map_err(|err| CodexErr::Io(io::Error::other(err.to_string())))?;
+
+    if let Some(after_spawn) = after_spawn {
+        after_spawn();
+    }
+
+    let mut events = started.process.subscribe_events();
+    let retained_bytes_cap = capture_policy.retained_bytes_cap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut emitted_deltas: usize = 0;
+    let mut exit_code: Option<i32> = None;
+    let mut timed_out = false;
+
+    let expiration_wait = async {
+        if capture_policy.uses_expiration() {
+            Some(expiration.wait_with_outcome().await)
+        } else {
+            std::future::pending::<Option<ExecExpirationOutcome>>().await
+        }
+    };
+    tokio::pin!(expiration_wait);
+
+    loop {
+        tokio::select! {
+            event_result = events.recv() => {
+                match event_result {
+                    Ok(ExecProcessEvent::Output(chunk)) => {
+                        let is_stderr = matches!(chunk.stream, HostExecOutputStream::Stderr);
+                        let bytes = chunk.chunk.into_inner();
+                        emit_exec_output_delta(&stdout_stream, &bytes, is_stderr, &mut emitted_deltas).await;
+                        if let Some(max_bytes) = retained_bytes_cap {
+                            if is_stderr {
+                                append_capped(&mut stderr, &bytes, max_bytes);
+                            } else {
+                                append_capped(&mut stdout, &bytes, max_bytes);
+                            }
+                        } else if is_stderr {
+                            stderr.extend_from_slice(&bytes);
+                        } else {
+                            stdout.extend_from_slice(&bytes);
+                        }
+                    }
+                    Ok(ExecProcessEvent::Exited { exit_code: code, .. }) => {
+                        exit_code = Some(code);
+                    }
+                    Ok(ExecProcessEvent::Closed { .. }) => {
+                        break;
+                    }
+                    Ok(ExecProcessEvent::Failed(message)) => {
+                        return Err(CodexErr::Io(io::Error::other(message)));
+                    }
+                    Err(err) => {
+                        return Err(CodexErr::Io(io::Error::other(err.to_string())));
+                    }
+                }
+            }
+            outcome = &mut expiration_wait => {
+                match outcome {
+                    Some(ExecExpirationOutcome::TimedOut) => {
+                        let _ = started.process.terminate().await;
+                        timed_out = true;
+                        exit_code = Some(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE);
+                    }
+                    Some(ExecExpirationOutcome::Cancelled) => {
+                        let _ = started.process.terminate().await;
+                        exit_code = Some(1);
+                    }
+                    None => unreachable!("expiration wait only resolves while expiration is active"),
+                }
+                break;
+            }
+        }
+    }
+
+    let exit_code = exit_code.unwrap_or(0);
+    let stdout = StreamOutput {
+        text: stdout,
+        truncated_after_lines: None,
+    };
+    let stderr = StreamOutput {
+        text: stderr,
+        truncated_after_lines: None,
+    };
+    let aggregated_output = aggregate_output(&stdout, &stderr, retained_bytes_cap);
+
+    Ok(RawExecToolCallOutput {
+        exit_status: synthetic_exit_status_for_code(exit_code),
+        exit_code_override: Some(exit_code),
+        stdout,
+        stderr,
+        aggregated_output,
+        timed_out,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -756,6 +945,7 @@ async fn exec_windows_sandbox(
 
     Ok(RawExecToolCallOutput {
         exit_status,
+        exit_code_override: None,
         stdout,
         stderr,
         aggregated_output,
@@ -784,7 +974,10 @@ fn finalize_exec_result(
                 }
             }
 
-            let mut exit_code = raw_output.exit_status.code().unwrap_or(-1);
+            let mut exit_code = raw_output
+                .exit_code_override
+                .or_else(|| raw_output.exit_status.code())
+                .unwrap_or(-1);
             if timed_out {
                 exit_code = EXEC_TIMEOUT_EXIT_CODE;
             }
@@ -826,6 +1019,7 @@ fn finalize_exec_result(
 #[derive(Debug)]
 struct RawExecToolCallOutput {
     pub exit_status: ExitStatus,
+    pub exit_code_override: Option<i32>,
     pub stdout: StreamOutput<Vec<u8>>,
     pub stderr: StreamOutput<Vec<u8>>,
     pub aggregated_output: StreamOutput<Vec<u8>>,
@@ -959,6 +1153,7 @@ async fn exec(
 
 /// Consumes the output of a child process according to the configured capture
 /// policy.
+#[cfg(not(target_arch = "wasm32"))]
 async fn consume_output(
     mut child: Child,
     expiration: ExecExpiration,
@@ -1091,6 +1286,7 @@ async fn consume_output(
 
     Ok(RawExecToolCallOutput {
         exit_status,
+        exit_code_override: None,
         stdout,
         stderr,
         aggregated_output,
@@ -1098,6 +1294,19 @@ async fn consume_output(
     })
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn consume_output(
+    _child: Child,
+    _expiration: ExecExpiration,
+    _capture_policy: ExecCapturePolicy,
+    _stdout_stream: Option<StdoutStream>,
+) -> Result<RawExecToolCallOutput> {
+    Err(CodexErr::Io(io::Error::other(
+        "browser process execution requires an almostnode host process shim",
+    )))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
     mut reader: R,
     stream: Option<StdoutStream>,
@@ -1118,27 +1327,7 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
             break;
         }
 
-        if let Some(stream) = &stream
-            && emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
-        {
-            let chunk = tmp[..n].to_vec();
-            let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
-                call_id: stream.call_id.clone(),
-                stream: if is_stderr {
-                    ExecOutputStream::Stderr
-                } else {
-                    ExecOutputStream::Stdout
-                },
-                chunk,
-            });
-            let event = Event {
-                id: stream.sub_id.clone(),
-                msg,
-            };
-            #[allow(clippy::let_unit_value)]
-            let _ = stream.tx_event.send(event).await;
-            emitted_deltas += 1;
-        }
+        emit_exec_output_delta(&stream, &tmp[..n], is_stderr, &mut emitted_deltas).await;
 
         if let Some(max_bytes) = max_bytes {
             append_capped(&mut buf, &tmp[..n], max_bytes);
@@ -1152,6 +1341,34 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
         text: buf,
         truncated_after_lines: None,
     })
+}
+
+async fn emit_exec_output_delta(
+    stream: &Option<StdoutStream>,
+    chunk: &[u8],
+    is_stderr: bool,
+    emitted_deltas: &mut usize,
+) {
+    if let Some(stream) = stream
+        && *emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
+    {
+        let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+            call_id: stream.call_id.clone(),
+            stream: if is_stderr {
+                ExecOutputStream::Stderr
+            } else {
+                ExecOutputStream::Stdout
+            },
+            chunk: chunk.to_vec(),
+        });
+        let event = Event {
+            id: stream.sub_id.clone(),
+            msg,
+        };
+        #[allow(clippy::let_unit_value)]
+        let _ = stream.tx_event.send(event).await;
+        *emitted_deltas += 1;
+    }
 }
 
 #[cfg(unix)]
@@ -1175,6 +1392,16 @@ fn synthetic_exit_status(code: i32) -> ExitStatus {
 }
 
 #[cfg(windows)]
+fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
+    synthetic_exit_status(code)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn synthetic_exit_status(_code: i32) -> ExitStatus {
+    ExitStatus::default()
+}
+
+#[cfg(target_arch = "wasm32")]
 fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
     synthetic_exit_status(code)
 }

@@ -4,15 +4,16 @@ mod regular;
 mod review;
 mod user_shell;
 
+use crate::time::Instant;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use codex_extension_api::ExtensionData;
 use futures::future::BoxFuture;
 use tokio::select;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::Span;
@@ -33,6 +34,7 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
+use crate::state::TaskAbortHandle;
 use crate::state::TaskKind;
 use codex_analytics::TurnProfileFact;
 use codex_analytics::TurnTokenUsageFact;
@@ -399,8 +401,7 @@ impl Session {
             codex.turn.token_usage.reasoning_output_tokens = field::Empty,
             codex.turn.token_usage.total_tokens = field::Empty,
         );
-        let handle = tokio::spawn(
-            async move {
+        let task_future = async move {
                 let ctx_for_finish = Arc::clone(&ctx);
                 let task_result = task_for_run
                     .run(
@@ -431,15 +432,15 @@ impl Session {
                 }
                 done_clone.notify_waiters();
             }
-            .instrument(task_span),
-        );
+            .instrument(task_span);
+        let handle = spawn_turn_task(task_future);
         let timer = turn_context
             .session_telemetry
             .start_timer(TURN_E2E_DURATION_METRIC, &[])
             .ok();
         let running_task = RunningTask {
             done,
-            handle: AbortOnDropHandle::new(handle),
+            handle,
             kind: task_kind,
             task,
             cancellation_token,
@@ -937,6 +938,19 @@ impl Session {
             warn!("failed to flush rollout after emitting terminal turn event: {err}");
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_turn_task(
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> TaskAbortHandle {
+    AbortOnDropHandle::new(tokio::spawn(future))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_turn_task(future: impl std::future::Future<Output = ()> + 'static) -> TaskAbortHandle {
+    wasm_bindgen_futures::spawn_local(future);
+    TaskAbortHandle
 }
 
 #[cfg(test)]

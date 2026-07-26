@@ -1,27 +1,42 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::ErrorKind;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
 use crate::StateDbHandle;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::rollout::list::find_thread_path_by_id_str;
 use crate::session::turn_context::TurnEnvironment;
 use crate::shell::Shell;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::shell::ShellType;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::shell::get_shell;
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::Context;
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::anyhow;
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::bail;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::Instrument;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::info_span;
 
 #[derive(Clone)]
@@ -87,34 +102,46 @@ impl ShellSnapshot {
         cwd: AbsolutePathBuf,
         shell: Shell,
     ) -> Option<Arc<ShellSnapshotFile>> {
-        let snapshot_span = info_span!("shell_snapshot", thread_id = %config.session_id);
-        async {
-            let timer = config
-                .session_telemetry
-                .start_timer("codex.shell_snapshot.duration_ms", &[]);
-            let snapshot = ShellSnapshot::try_create(
-                &config.codex_home,
-                config.session_id,
-                &cwd,
-                &shell,
-                config.state_db.clone(),
-            )
-            .await;
-            let success_tag = if snapshot.is_ok() { "true" } else { "false" };
-            let _ = timer.map(|timer| timer.record(&[("success", success_tag)]));
-            let mut counter_tags = vec![("success", success_tag)];
-            if let Some(failure_reason) = snapshot.as_ref().err() {
-                counter_tags.push(("failure_reason", *failure_reason));
-            }
-            config
-                .session_telemetry
-                .counter("codex.shell_snapshot", /*inc*/ 1, &counter_tags);
-            snapshot.ok().map(Arc::new)
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (config, cwd, shell);
+            return None;
         }
-        .instrument(snapshot_span)
-        .await
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let snapshot_span = info_span!("shell_snapshot", thread_id = %config.session_id);
+            async {
+                let timer = config
+                    .session_telemetry
+                    .start_timer("codex.shell_snapshot.duration_ms", &[]);
+                let snapshot = ShellSnapshot::try_create(
+                    &config.codex_home,
+                    config.session_id,
+                    &cwd,
+                    &shell,
+                    config.state_db.clone(),
+                )
+                .await;
+                let success_tag = if snapshot.is_ok() { "true" } else { "false" };
+                let _ = timer.map(|timer| timer.record(&[("success", success_tag)]));
+                let mut counter_tags = vec![("success", success_tag)];
+                if let Some(failure_reason) = snapshot.as_ref().err() {
+                    counter_tags.push(("failure_reason", *failure_reason));
+                }
+                config.session_telemetry.counter(
+                    "codex.shell_snapshot",
+                    /*inc*/ 1,
+                    &counter_tags,
+                );
+                snapshot.ok().map(Arc::new)
+            }
+            .instrument(snapshot_span)
+            .await
+        }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn try_create(
         codex_home: &AbsolutePathBuf,
         session_id: ThreadId,
@@ -195,6 +222,7 @@ impl Drop for ShellSnapshotFile {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn write_shell_snapshot(
     shell_type: ShellType,
     output_path: &AbsolutePathBuf,
@@ -224,6 +252,7 @@ async fn write_shell_snapshot(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn capture_snapshot(shell: &Shell, cwd: &AbsolutePathBuf) -> Result<String> {
     let shell_type = shell.shell_type;
     match shell_type {
@@ -235,6 +264,7 @@ async fn capture_snapshot(shell: &Shell, cwd: &AbsolutePathBuf) -> Result<String
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn strip_snapshot_preamble(snapshot: &str) -> Result<String> {
     let marker = "# Snapshot file";
     let Some(start) = snapshot.find(marker) else {
@@ -244,6 +274,7 @@ fn strip_snapshot_preamble(snapshot: &str) -> Result<String> {
     Ok(snapshot[start..].to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn validate_snapshot(
     shell: &Shell,
     snapshot_path: &AbsolutePathBuf,
@@ -262,6 +293,7 @@ async fn validate_snapshot(
     .map(|_| ())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_shell_script(shell: &Shell, script: &str, cwd: &AbsolutePathBuf) -> Result<String> {
     run_script_with_timeout(
         shell,
@@ -273,6 +305,7 @@ async fn run_shell_script(shell: &Shell, script: &str, cwd: &AbsolutePathBuf) ->
     .await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_script_with_timeout(
     shell: &Shell,
     script: &str,
@@ -311,10 +344,12 @@ async fn run_script_with_timeout(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn excluded_exports_regex() -> String {
     EXCLUDED_EXPORT_VARS.join("|")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn zsh_snapshot_script() -> String {
     let excluded = excluded_exports_regex();
     let script = r##"if [[ -n "$ZDOTDIR" ]]; then
@@ -366,6 +401,7 @@ fi
     script.replace("EXCLUDED_EXPORTS", &excluded)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn bash_snapshot_script() -> String {
     let excluded = excluded_exports_regex();
     let script = r##"if [ -z "$BASH_ENV" ] && [ -r "$HOME/.bashrc" ]; then
@@ -408,6 +444,7 @@ fi
     script.replace("EXCLUDED_EXPORTS", &excluded)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sh_snapshot_script() -> String {
     let excluded = excluded_exports_regex();
     let script = r##"if [ -n "$ENV" ] && [ -r "$ENV" ]; then
@@ -476,6 +513,7 @@ fi
     script.replace("EXCLUDED_EXPORTS", &excluded)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn powershell_snapshot_script() -> &'static str {
     r##"$ErrorActionPreference = 'Stop'
 Write-Output '# Snapshot file'
@@ -509,70 +547,81 @@ pub async fn cleanup_stale_snapshots(
     active_session_id: ThreadId,
     state_db: Option<StateDbHandle>,
 ) -> Result<()> {
-    let snapshot_dir = codex_home.join(SNAPSHOT_DIR);
-
-    let mut entries = match fs::read_dir(&snapshot_dir).await {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-
-    let now = SystemTime::now();
-    let active_session_id = active_session_id.to_string();
-
-    while let Some(entry) = entries.next_entry().await? {
-        if !entry.file_type().await?.is_file() {
-            continue;
-        }
-
-        let path = entry.path();
-
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        let Some(session_id) = snapshot_session_id_from_file_name(&file_name) else {
-            remove_snapshot_file(&path).await;
-            continue;
-        };
-        if session_id == active_session_id {
-            continue;
-        }
-
-        let rollout_path =
-            find_thread_path_by_id_str(codex_home, session_id, state_db.as_deref()).await?;
-        let Some(rollout_path) = rollout_path else {
-            remove_snapshot_file(&path).await;
-            continue;
-        };
-
-        let modified = match fs::metadata(&rollout_path).await.and_then(|m| m.modified()) {
-            Ok(modified) => modified,
-            Err(err) => {
-                tracing::warn!(
-                    "Failed to check rollout age for snapshot {}: {err:?}",
-                    path.display()
-                );
-                continue;
-            }
-        };
-
-        if now
-            .duration_since(modified)
-            .ok()
-            .is_some_and(|age| age >= SNAPSHOT_RETENTION)
-        {
-            remove_snapshot_file(&path).await;
-        }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (codex_home, active_session_id, state_db);
+        return Ok(());
     }
 
-    Ok(())
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let snapshot_dir = codex_home.join(SNAPSHOT_DIR);
+
+        let mut entries = match fs::read_dir(&snapshot_dir).await {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+
+        let now = SystemTime::now();
+        let active_session_id = active_session_id.to_string();
+
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+
+            let path = entry.path();
+
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            let Some(session_id) = snapshot_session_id_from_file_name(&file_name) else {
+                remove_snapshot_file(&path).await;
+                continue;
+            };
+            if session_id == active_session_id {
+                continue;
+            }
+
+            let rollout_path =
+                find_thread_path_by_id_str(codex_home, session_id, state_db.as_deref()).await?;
+            let Some(rollout_path) = rollout_path else {
+                remove_snapshot_file(&path).await;
+                continue;
+            };
+
+            let modified = match fs::metadata(&rollout_path).await.and_then(|m| m.modified()) {
+                Ok(modified) => modified,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to check rollout age for snapshot {}: {err:?}",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+
+            if now
+                .duration_since(modified)
+                .ok()
+                .is_some_and(|age| age >= SNAPSHOT_RETENTION)
+            {
+                remove_snapshot_file(&path).await;
+            }
+        }
+
+        Ok(())
+    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn remove_snapshot_file(path: &Path) {
     if let Err(err) = fs::remove_file(path).await {
         tracing::warn!("Failed to delete shell snapshot at {:?}: {err:?}", path);
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn snapshot_session_id_from_file_name(file_name: &str) -> Option<&str> {
     let (stem, extension) = file_name.rsplit_once('.')?;
     match extension {

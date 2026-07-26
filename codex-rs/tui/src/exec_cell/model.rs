@@ -7,7 +7,10 @@
 
 use std::borrow::Cow;
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use super::live_output::LiveCommandOutput;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;

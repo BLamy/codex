@@ -13,7 +13,13 @@ workspace = true
 [dependencies]
 codex-extension-api = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["fs"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+codex-exec-server = { workspace = true }
+codex-utils-path-uri = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

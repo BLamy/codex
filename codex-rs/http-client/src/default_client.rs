@@ -150,12 +150,21 @@ impl RequestBuilder {
         match self.builder.headers(headers).send().await {
             Ok(response) => {
                 if self.request_logging == RequestLogging::Enabled {
+                    #[cfg(not(target_arch = "wasm32"))]
                     tracing::debug!(
                         method = %self.method,
                         url = %self.url,
                         status = %response.status(),
                         headers = ?response.headers(),
                         version = ?response.version(),
+                        "Request completed"
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    tracing::debug!(
+                        method = %self.method,
+                        url = %self.url,
+                        status = %response.status(),
+                        headers = ?response.headers(),
                         "Request completed"
                     );
                 }

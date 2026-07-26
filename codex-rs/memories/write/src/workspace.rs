@@ -11,7 +11,7 @@ use std::path::Path;
 /// metadata is missing or unusable, and removes any stale generated `phase2_workspace_diff.md` file
 /// so that the next diff does not include a previous prompt artifact.
 pub async fn prepare_memory_workspace(root: &Path) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(root)
+    crate::fs::create_dir_all(root)
         .await
         .with_context(|| format!("create memory workspace {}", root.display()))?;
     remove_workspace_diff(root).await?;
@@ -31,7 +31,7 @@ pub async fn memory_workspace_diff(root: &Path) -> anyhow::Result<GitBaselineDif
 /// Writes `phase2_workspace_diff.md` with a bounded git-style diff from the current baseline.
 pub async fn write_workspace_diff(root: &Path, diff: &GitBaselineDiff) -> anyhow::Result<()> {
     let path = root.join(crate::workspace_diff::FILENAME);
-    tokio::fs::write(&path, render_workspace_diff_file(diff))
+    crate::fs::write(&path, render_workspace_diff_file(diff))
         .await
         .with_context(|| format!("write memory workspace diff file {}", path.display()))
 }
@@ -80,7 +80,7 @@ pub async fn validate_consolidation_artifacts(root: &Path) -> anyhow::Result<()>
 /// workspace input.
 pub(super) async fn remove_workspace_diff(root: &Path) -> anyhow::Result<()> {
     let path = root.join(crate::workspace_diff::FILENAME);
-    match tokio::fs::remove_file(&path).await {
+    match crate::fs::remove_file(&path).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err)

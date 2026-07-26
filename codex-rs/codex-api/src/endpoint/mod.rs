@@ -5,7 +5,10 @@ pub(crate) mod models;
 pub(crate) mod realtime_call;
 pub(crate) mod realtime_websocket;
 pub(crate) mod responses;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod responses_websocket;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod responses_websocket_wasm;
 pub(crate) mod search;
 mod session;
 
@@ -27,8 +30,20 @@ pub use realtime_websocket::RealtimeWebsocketWriter;
 pub use realtime_websocket::session_update_session_json;
 pub use responses::ResponsesClient;
 pub use responses::ResponsesOptions;
+#[cfg(not(target_arch = "wasm32"))]
 pub use responses_websocket::ResponsesWebsocketClient;
+#[cfg(not(target_arch = "wasm32"))]
 pub use responses_websocket::ResponsesWebsocketClose;
+#[cfg(not(target_arch = "wasm32"))]
 pub use responses_websocket::ResponsesWebsocketConnection;
+#[cfg(not(target_arch = "wasm32"))]
 pub use responses_websocket::ResponsesWebsocketProbe;
+#[cfg(target_arch = "wasm32")]
+pub use responses_websocket_wasm::ResponsesWebsocketClient;
+#[cfg(target_arch = "wasm32")]
+pub use responses_websocket_wasm::ResponsesWebsocketClose;
+#[cfg(target_arch = "wasm32")]
+pub use responses_websocket_wasm::ResponsesWebsocketConnection;
+#[cfg(target_arch = "wasm32")]
+pub use responses_websocket_wasm::ResponsesWebsocketProbe;
 pub use search::SearchClient;

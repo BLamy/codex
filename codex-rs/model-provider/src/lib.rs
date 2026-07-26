@@ -1,3 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
+mod amazon_bedrock;
+#[cfg(target_arch = "wasm32")]
+#[path = "amazon_bedrock_wasm.rs"]
 mod amazon_bedrock;
 mod auth;
 mod bearer_auth_provider;

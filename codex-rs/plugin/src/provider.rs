@@ -114,10 +114,18 @@ pub trait PluginProvider: Send + Sync {
     type Error: StdError + Send + Sync + 'static;
 
     /// Resolves one selected root without activating any of its components.
+    #[cfg(not(target_arch = "wasm32"))]
     fn resolve(
         &self,
         root: &SelectedCapabilityRoot,
     ) -> impl Future<Output = Result<Option<ResolvedPlugin>, Self::Error>> + Send;
+
+    /// Resolves one selected root without activating any of its components.
+    #[cfg(target_arch = "wasm32")]
+    fn resolve(
+        &self,
+        root: &SelectedCapabilityRoot,
+    ) -> impl Future<Output = Result<Option<ResolvedPlugin>, Self::Error>>;
 }
 
 #[cfg(test)]

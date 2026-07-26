@@ -1,9 +1,9 @@
+use crate::time::Instant;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use std::time::Instant;
 
 pub use codex_connectors::AppBranding;
 pub use codex_connectors::AppInfo;

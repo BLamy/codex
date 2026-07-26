@@ -5,7 +5,10 @@ use codex_exec_server::HttpClient;
 use codex_exec_server::HttpRequestParams;
 use codex_exec_server::HttpRequestResponse;
 use codex_exec_server::HttpResponseBodyStream;
-use futures::future::BoxFuture;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::future::BoxFuture as MaybeSendBoxFuture;
+#[cfg(target_arch = "wasm32")]
+use futures::future::LocalBoxFuture as MaybeSendBoxFuture;
 
 const OPENAI_DEVELOPER_DOCS_MCP_URL: &str = "https://developers.openai.com/mcp";
 const OPENAI_DEVELOPER_DOCS_MCP_CODEX_URL: &str = "https://developers.openai.com/mcp?source=codex";
@@ -37,7 +40,7 @@ impl HttpClient for OpenAiDocsHttpClient {
     fn http_request(
         &self,
         mut params: HttpRequestParams,
-    ) -> BoxFuture<'_, Result<HttpRequestResponse, ExecServerError>> {
+    ) -> MaybeSendBoxFuture<'_, Result<HttpRequestResponse, ExecServerError>> {
         self.attribute_mcp_request(&mut params);
         self.http_client.http_request(params)
     }
@@ -45,7 +48,10 @@ impl HttpClient for OpenAiDocsHttpClient {
     fn http_request_stream(
         &self,
         mut params: HttpRequestParams,
-    ) -> BoxFuture<'_, Result<(HttpRequestResponse, HttpResponseBodyStream), ExecServerError>> {
+    ) -> MaybeSendBoxFuture<
+        '_,
+        Result<(HttpRequestResponse, HttpResponseBodyStream), ExecServerError>,
+    > {
         self.attribute_mcp_request(&mut params);
         self.http_client.http_request_stream(params)
     }

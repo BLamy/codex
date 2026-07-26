@@ -24,9 +24,12 @@ use rama_tls_rustls::client::TlsConnectorLayer;
 use rama_tls_rustls::client::client_root_certs;
 use rama_tls_rustls::dep::rustls;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 use tracing::info;
 use tracing::warn;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 #[cfg(target_os = "macos")]
 use rama_unix::client::UnixConnector;

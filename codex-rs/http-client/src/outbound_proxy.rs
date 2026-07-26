@@ -11,9 +11,12 @@ use std::io;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use tokio::sync::Semaphore;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::custom_ca::BuildCustomCaTransportError;
 use crate::custom_ca::build_reqwest_client_with_custom_ca;

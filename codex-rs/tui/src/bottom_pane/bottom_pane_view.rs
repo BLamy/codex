@@ -4,7 +4,7 @@ use crate::bottom_pane::McpServerElicitationFormRequest;
 use crate::render::renderable::Renderable;
 use codex_app_server_protocol::ToolRequestUserInputParams;
 use crossterm::event::KeyEvent;
-use std::time::Instant;
+use crate::time::Instant;
 
 use super::CancellationEvent;
 

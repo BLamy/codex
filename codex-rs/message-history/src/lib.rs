@@ -31,8 +31,16 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::UNIX_EPOCH;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 use codex_config::types::History;
 use codex_config::types::HistoryPersistence;
@@ -125,8 +133,8 @@ pub async fn append_entry(
     }
 
     // Compute timestamp (seconds since the Unix epoch).
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map_err(|e| std::io::Error::other(format!("system clock before Unix epoch: {e}")))?
         .as_secs();
 

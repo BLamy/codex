@@ -1,24 +1,33 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::LazyLock;
 
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest::cookie::CookieStore;
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest::cookie::Jar;
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest::header::HeaderValue;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::chatgpt_hosts::is_allowed_chatgpt_host;
 
 // WARNING: this HTTP cookie store is process-global and may be shared across auth contexts.
 // It must only ever contain Cloudflare infrastructure cookies. Never extend this
 // store to persist ChatGPT account, session, auth, or other user-specific cookie
 // data.
+#[cfg(not(target_arch = "wasm32"))]
 static SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
     LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Default)]
 struct ChatGptCloudflareCookieStore {
     jar: Jar,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl CookieStore for ChatGptCloudflareCookieStore {
     fn set_cookies(
         &self,
@@ -49,12 +58,21 @@ impl CookieStore for ChatGptCloudflareCookieStore {
 /// small allowlist of Cloudflare cookie names and refuses all other ChatGPT cookies. Do not store
 /// ChatGPT account, session, auth, or other user-specific cookies here. If a future caller needs
 /// those cookies, the store must be scoped to the auth/session owner instead of shared globally.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn with_chatgpt_cloudflare_cookie_store(
     builder: reqwest::ClientBuilder,
 ) -> reqwest::ClientBuilder {
     builder.cookie_provider(Arc::clone(&SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE))
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn with_chatgpt_cloudflare_cookie_store(
+    builder: reqwest::ClientBuilder,
+) -> reqwest::ClientBuilder {
+    builder
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn is_chatgpt_cookie_url(url: &reqwest::Url) -> bool {
     match url.scheme() {
         "https" => {}
@@ -68,6 +86,7 @@ fn is_chatgpt_cookie_url(url: &reqwest::Url) -> bool {
     is_allowed_chatgpt_host(host)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_allowed_cloudflare_set_cookie_header(header: &HeaderValue) -> bool {
     header
         .to_str()
@@ -76,12 +95,14 @@ fn is_allowed_cloudflare_set_cookie_header(header: &HeaderValue) -> bool {
         .is_some_and(is_allowed_cloudflare_cookie_name)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn set_cookie_name(header: &str) -> Option<&str> {
     let (name, _) = header.split_once('=')?;
     let name = name.trim();
     (!name.is_empty()).then_some(name)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn only_cloudflare_cookies(header: HeaderValue) -> Option<HeaderValue> {
     let header = header.to_str().ok()?;
     let cookies = header
@@ -101,6 +122,7 @@ fn only_cloudflare_cookies(header: HeaderValue) -> Option<HeaderValue> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
     // Keep this allowlist aligned with Cloudflare's documented service cookies:
     // https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/
@@ -118,7 +140,7 @@ fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
     ) || name.starts_with("cf_chl_")
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;

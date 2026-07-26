@@ -81,9 +81,42 @@ async fn hydrate_personal_access_token(
     endpoint: &str,
     access_token: &str,
 ) -> std::io::Result<PersonalAccessTokenAuth> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        hydrate_personal_access_token_local(
+            client.clone(),
+            endpoint.to_string(),
+            access_token.to_string(),
+        )
+        .await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let client = client.clone();
+        let endpoint = endpoint.to_string();
+        let access_token = access_token.to_string();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = hydrate_personal_access_token_local(client, endpoint, access_token).await;
+            let _ = sender.send(result);
+        });
+        receiver.await.map_err(|_| {
+            std::io::Error::other(
+                "browser personal access token task ended before producing a result",
+            )
+        })?
+    }
+}
+
+async fn hydrate_personal_access_token_local(
+    client: HttpClient,
+    endpoint: String,
+    access_token: String,
+) -> std::io::Result<PersonalAccessTokenAuth> {
     let response = client
-        .get(endpoint)
-        .bearer_auth(access_token)
+        .get(&endpoint)
+        .bearer_auth(&access_token)
         .send()
         .await
         .map_err(|err| {
@@ -107,7 +140,7 @@ async fn hydrate_personal_access_token(
             ))
         })?;
     Ok(PersonalAccessTokenAuth {
-        access_token: access_token.to_string(),
+        access_token,
         metadata,
     })
 }

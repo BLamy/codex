@@ -20,6 +20,18 @@ use tracing::warn;
 ///
 /// The pipeline is skipped for ephemeral sessions, disabled feature flags, and
 /// subagent sessions.
+#[cfg(target_arch = "wasm32")]
+pub fn start_memories_startup_task(
+    _thread_manager: Arc<ThreadManager>,
+    _auth_manager: Arc<AuthManager>,
+    _thread_id: ThreadId,
+    _thread: Arc<CodexThread>,
+    _config: Arc<Config>,
+    _source: &SessionSource,
+) {
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn start_memories_startup_task(
     thread_manager: Arc<ThreadManager>,
     auth_manager: Arc<AuthManager>,
@@ -52,7 +64,7 @@ pub fn start_memories_startup_task(
 
     tokio::spawn(async move {
         let root = memory_root(&config.codex_home);
-        if let Err(err) = tokio::fs::create_dir_all(&root).await {
+        if let Err(err) = crate::fs::create_dir_all(&root).await {
             warn!("failed creating memories root: {err}");
             return;
         }

@@ -14,7 +14,7 @@ pub fn sse_stream(
     idle_timeout: Duration,
     tx: mpsc::Sender<Result<String, StreamError>>,
 ) {
-    tokio::spawn(async move {
+    let task = async move {
         let mut stream = stream
             .map(|res| res.map_err(|e| StreamError::Stream(e.to_string())))
             .eventsource();
@@ -44,5 +44,11 @@ pub fn sse_stream(
                 }
             }
         }
-    });
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::spawn(task);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(task);
 }

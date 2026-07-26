@@ -9,6 +9,7 @@ use crate::CopyOptions;
 use crate::CreateDirectoryOptions;
 use crate::ExecutorFileSystem;
 use crate::RemoveOptions;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::local_file_system::DirectFileSystem;
 use crate::protocol::FS_CANONICALIZE_METHOD;
 use crate::protocol::FS_COPY_METHOD;
@@ -198,6 +199,7 @@ fn unexpected_response(expected: &str, actual: &str) -> JSONRPCErrorError {
     ))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn run_direct_request(
     request: FsHelperRequest,
 ) -> Result<FsHelperPayload, JSONRPCErrorError> {

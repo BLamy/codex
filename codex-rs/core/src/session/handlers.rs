@@ -306,7 +306,7 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
         sess.active_turn_context_and_cancellation_token().await
     {
         let session = Arc::clone(sess);
-        tokio::spawn(async move {
+        let shell_command_task = async move {
             execute_user_shell_command(
                 session,
                 turn_context,
@@ -315,7 +315,11 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
                 UserShellCommandMode::ActiveTurnAuxiliary,
             )
             .await;
-        });
+        };
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(shell_command_task);
+        #[cfg(not(target_arch = "wasm32"))]
+        drop(tokio::spawn(shell_command_task));
         return;
     }
 

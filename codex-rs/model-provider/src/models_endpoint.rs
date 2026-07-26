@@ -23,6 +23,7 @@ use codex_login::default_client::build_default_reqwest_client_for_route_async;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
@@ -39,7 +40,7 @@ const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
 
 /// Provider-owned OpenAI-compatible `/models` endpoint.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
@@ -92,7 +93,7 @@ impl OpenAiModelsEndpoint {
             None
         };
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+            auth_mode: auth_mode.map(telemetry_auth_mode_label),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,
             agent_identity_telemetry,
@@ -129,7 +130,18 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     }
 
     fn uses_codex_backend(&self) -> ModelsEndpointFuture<'_, bool> {
-        Box::pin(OpenAiModelsEndpoint::uses_codex_backend(self))
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Box::pin(OpenAiModelsEndpoint::uses_codex_backend(self))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let endpoint = self.clone();
+            bridge_local_models_endpoint_future(
+                async move { endpoint.uses_codex_backend().await },
+                || false,
+            )
+        }
     }
 
     fn list_models<'a>(
@@ -137,16 +149,62 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         client_version: &'a str,
         http_client_factory: HttpClientFactory,
     ) -> ModelsEndpointFuture<'a, CoreResult<(Vec<ModelInfo>, Option<String>)>> {
-        Box::pin(OpenAiModelsEndpoint::list_models(
-            self,
-            client_version,
-            http_client_factory,
-        ))
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Box::pin(OpenAiModelsEndpoint::list_models(
+                self,
+                client_version,
+                http_client_factory,
+            ))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let endpoint = self.clone();
+            let client_version = client_version.to_string();
+            bridge_local_models_endpoint_future(
+                async move {
+                    endpoint
+                        .list_models(&client_version, http_client_factory)
+                        .await
+                },
+                || {
+                    Err(CodexErr::Io(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "browser models endpoint task was cancelled",
+                    )))
+                },
+            )
+        }
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn bridge_local_models_endpoint_future<T, F>(
+    future: F,
+    cancelled: impl FnOnce() -> T + Send + 'static,
+) -> ModelsEndpointFuture<'static, T>
+where
+    T: Send + 'static,
+    F: Future<Output = T> + 'static,
+{
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = sender.send(future.await);
+    });
+    Box::pin(async move {
+        match receiver.await {
+            Ok(value) => value,
+            Err(_) => cancelled(),
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 type ModelsTransportFuture<'a> =
     Pin<Box<dyn Future<Output = std::io::Result<ReqwestTransport>> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+type ModelsTransportFuture<'a> =
+    Pin<Box<dyn Future<Output = std::io::Result<ReqwestTransport>> + 'a>>;
 
 /// Builds the concrete transport selected for one models request.
 ///
@@ -177,6 +235,19 @@ impl ModelsTransportBuilder for RouteAwareModelsTransportBuilder {
             .await
             .map(ReqwestTransport::new)
         })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn telemetry_auth_mode_label(mode: impl Into<TelemetryAuthMode>) -> String {
+    mode.into().to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn telemetry_auth_mode_label(mode: impl ToString) -> String {
+    match mode.to_string().as_str() {
+        "ApiKey" | "api_key" | "api-key" | "apikey" => "ApiKey".to_string(),
+        _ => "Chatgpt".to_string(),
     }
 }
 

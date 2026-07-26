@@ -1,4 +1,5 @@
 use crate::function_tool::FunctionCallError;
+use crate::time::Instant;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -18,7 +19,6 @@ use codex_tools::ToolSpec;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::time::Duration;
-use std::time::Instant;
 
 const NAMESPACE: &str = "clock";
 const TOOL_NAME: &str = "sleep";

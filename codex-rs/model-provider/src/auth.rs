@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+#[cfg(not(target_arch = "wasm32"))]
 use codex_agent_identity::AgentIdentityKey;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_agent_identity::authorization_header_for_agent_task;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::AuthProvider;
@@ -17,6 +19,7 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use http::HeaderValue;
 
 use crate::bearer_auth_provider::BearerAuthProvider;
@@ -63,8 +66,12 @@ impl ResolvedProviderAuth {
 
     fn for_agent_identity(auth: AgentIdentityAuth) -> Self {
         let agent_identity_telemetry = agent_identity_telemetry(&auth);
+        #[cfg(not(target_arch = "wasm32"))]
+        let auth = Arc::new(AgentIdentityAuthProvider { auth }) as SharedAuthProvider;
+        #[cfg(target_arch = "wasm32")]
+        let auth = unauthenticated_auth_provider();
         Self {
-            auth: Arc::new(AgentIdentityAuthProvider { auth }),
+            auth,
             agent_identity_telemetry: Some(agent_identity_telemetry),
         }
     }
@@ -78,10 +85,12 @@ pub(crate) fn agent_identity_telemetry(auth: &AgentIdentityAuth) -> AgentIdentit
 }
 
 #[derive(Clone, Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 struct AgentIdentityAuthProvider {
     auth: AgentIdentityAuth,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AuthProvider for AgentIdentityAuthProvider {
     fn add_auth_headers(&self, headers: &mut HeaderMap) {
         let record = self.auth.record();
@@ -281,9 +290,12 @@ fn bearer_auth_for_provider(
 /// Builds request-header auth for a first-party Codex auth snapshot.
 pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
     match auth {
+        #[cfg(not(target_arch = "wasm32"))]
         CodexAuth::AgentIdentity(auth) => {
             Arc::new(AgentIdentityAuthProvider { auth: auth.clone() })
         }
+        #[cfg(target_arch = "wasm32")]
+        CodexAuth::AgentIdentity(_) => unauthenticated_auth_provider(),
         CodexAuth::Headers(auth) => Arc::new(HeaderAuthProvider { auth: auth.clone() }),
         CodexAuth::BedrockApiKey(_) => unreachable!("{BEDROCK_API_KEY_UNSUPPORTED_MESSAGE}"),
         CodexAuth::ApiKey(_)

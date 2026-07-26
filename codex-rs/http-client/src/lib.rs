@@ -1,14 +1,22 @@
 mod chatgpt_cloudflare_cookies;
 mod chatgpt_hosts;
+#[cfg(not(target_arch = "wasm32"))]
 mod custom_ca;
+#[cfg(target_arch = "wasm32")]
+mod custom_ca_wasm;
 mod default_client;
 mod error;
+#[cfg(not(target_arch = "wasm32"))]
+mod outbound_proxy;
+#[cfg(target_arch = "wasm32")]
+#[path = "outbound_proxy_wasm.rs"]
 mod outbound_proxy;
 mod request;
 mod transport;
 
 pub use crate::chatgpt_cloudflare_cookies::with_chatgpt_cloudflare_cookie_store;
 pub use crate::chatgpt_hosts::is_allowed_chatgpt_host;
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::custom_ca::BuildCustomCaTransportError;
 /// Test-only subprocess hook for custom CA coverage.
 ///
@@ -16,10 +24,18 @@ pub use crate::custom_ca::BuildCustomCaTransportError;
 /// is hidden from normal docs because ordinary callers should use
 /// [`build_reqwest_client_with_custom_ca`] instead.
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::custom_ca::build_reqwest_client_for_subprocess_tests;
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::custom_ca::build_reqwest_client_with_custom_ca;
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::custom_ca::build_rustls_client_config_with_custom_ca;
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::custom_ca::maybe_build_rustls_client_config_with_custom_ca;
+#[cfg(target_arch = "wasm32")]
+pub use crate::custom_ca_wasm::BuildCustomCaTransportError;
+#[cfg(target_arch = "wasm32")]
+pub use crate::custom_ca_wasm::build_reqwest_client_with_custom_ca;
 pub use crate::default_client::HttpClient;
 pub use crate::default_client::RequestBuilder;
 pub use crate::error::StreamError;

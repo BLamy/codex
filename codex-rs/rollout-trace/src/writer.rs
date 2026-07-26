@@ -9,8 +9,14 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 use anyhow::Context;
 use anyhow::Result;

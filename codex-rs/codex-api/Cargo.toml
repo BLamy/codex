@@ -12,8 +12,6 @@ chrono = { workspace = true }
 codex-client = { workspace = true }
 codex-http-client = { workspace = true }
 codex-protocol = { workspace = true }
-codex-utils-rustls-provider = { workspace = true }
-codex-websocket-client = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
@@ -21,15 +19,24 @@ schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "macros", "net", "rt", "sync", "time"] }
-tokio-tungstenite = { workspace = true }
-tungstenite = { workspace = true }
 tracing = { workspace = true }
 eventsource-stream = { workspace = true }
 regex-lite = { workspace = true }
-tokio-util = { workspace = true, features = ["codec", "io"] }
 url = { workspace = true }
 uuid = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+wasm-bindgen-futures = "0.4"
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+codex-utils-rustls-provider = { workspace = true }
+codex-websocket-client = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt", "sync", "time"] }
+tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true, features = ["codec", "io"] }
+tungstenite = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

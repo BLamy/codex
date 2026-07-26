@@ -1,27 +1,75 @@
+/// The upstream Codex CLI version compiled into this crate.
+///
+/// Browser hosts should use this value instead of adapter package metadata or
+/// mutable runtime environment variables when reporting version provenance.
+pub const CODEX_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(target_arch = "wasm32")]
+pub mod browser_cli;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod browser_tui;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod debug_sandbox;
+#[cfg(not(target_arch = "wasm32"))]
 mod exit_status;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod login;
 
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserCodexCliSession;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserExecPlan;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserLoginMethod;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserLoginRequest;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserRunOptions;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserRunResult;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserTuiAction;
+#[cfg(target_arch = "wasm32")]
+pub use browser_cli::BrowserTuiRunResult;
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Args;
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_cli::CliConfigOverrides;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_cli::ProfileV2Name;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use debug_sandbox::run_command_under_landlock;
+#[cfg(not(target_arch = "wasm32"))]
 pub use debug_sandbox::run_command_under_seatbelt;
+#[cfg(not(target_arch = "wasm32"))]
 pub use debug_sandbox::run_command_under_windows_sandbox;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::read_access_token_from_stdin;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::read_api_key_from_stdin;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_status;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_with_access_token;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_with_api_key;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_with_chatgpt;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_with_device_code;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_login_with_device_code_fallback_to_browser;
+#[cfg(not(target_arch = "wasm32"))]
 pub use login::run_logout;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Default, Args)]
 pub struct SandboxStateArgs {
     /// JSON value from `codex/sandbox-state-meta` to apply directly.
@@ -47,6 +95,7 @@ pub struct SandboxStateArgs {
 
 // These command structs share common sandbox options, but remain separate
 // because each host backend has a slightly different option surface.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 pub struct SeatbeltCommand {
     #[command(flatten)]
@@ -98,11 +147,13 @@ pub struct SeatbeltCommand {
     pub command: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_absolute_path(raw: &str) -> Result<AbsolutePathBuf, String> {
     AbsolutePathBuf::relative_to_current_dir(raw)
         .map_err(|err| format!("invalid path {raw}: {err}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 pub struct LandlockCommand {
     #[command(flatten)]
@@ -146,6 +197,7 @@ pub struct LandlockCommand {
     pub command: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 pub struct WindowsCommand {
     #[command(flatten)]

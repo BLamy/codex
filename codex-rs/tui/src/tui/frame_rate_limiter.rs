@@ -7,7 +7,10 @@
 //! the async frame scheduler without adding complexity to the app/event loop.
 
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 /// A 120 FPS minimum frame interval (≈8.33ms).
 pub(super) const MIN_FRAME_INTERVAL: Duration = Duration::from_nanos(8_333_334);

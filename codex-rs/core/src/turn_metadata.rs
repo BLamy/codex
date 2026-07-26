@@ -7,7 +7,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use serde_json::Value;
-use tokio::task::JoinHandle;
+#[cfg(not(target_arch = "wasm32"))]
+type GitEnrichmentTaskHandle = tokio::task::JoinHandle<()>;
 
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
@@ -32,6 +33,30 @@ const MODEL_KEY: &str = "model";
 const REASONING_EFFORT_KEY: &str = "reasoning_effort";
 const USER_INPUT_REQUESTED_DURING_TURN_KEY: &str = "user_input_requested_during_turn";
 const WORKSPACE_KIND_KEY: &str = "workspace_kind";
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct GitEnrichmentTaskHandle;
+
+#[cfg(target_arch = "wasm32")]
+impl GitEnrichmentTaskHandle {
+    fn abort(&self) {}
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_git_enrichment_future(
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> GitEnrichmentTaskHandle {
+    tokio::spawn(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_git_enrichment_future(
+    future: impl std::future::Future<Output = ()> + 'static,
+) -> GitEnrichmentTaskHandle {
+    wasm_bindgen_futures::spawn_local(future);
+    GitEnrichmentTaskHandle
+}
 
 pub(crate) struct McpTurnMetadataContext<'a> {
     pub(crate) model: &'a str,
@@ -99,7 +124,7 @@ pub(crate) struct TurnMetadataState {
     turn_started_at_unix_ms: Arc<RwLock<Option<i64>>>,
     responsesapi_client_metadata: Arc<RwLock<BTreeMap<String, String>>>,
     user_input_requested_during_turn: Arc<AtomicBool>,
-    enrichment_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    enrichment_task: Arc<Mutex<Option<GitEnrichmentTaskHandle>>>,
 }
 
 impl TurnMetadataState {
@@ -283,7 +308,7 @@ impl TurnMetadataState {
         }
 
         let state = self.clone();
-        *task_guard = Some(tokio::spawn(async move {
+        *task_guard = Some(spawn_git_enrichment_future(async move {
             let workspace_git_metadata = state.fetch_workspace_git_metadata().await;
             let Some(repo_root) = state.repo_root.clone() else {
                 return;

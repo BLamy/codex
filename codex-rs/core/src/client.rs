@@ -75,6 +75,7 @@ use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
 use codex_protocol::auth::AuthMode;
 
+use crate::time::Instant;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
@@ -97,11 +98,12 @@ use http::HeaderValue;
 use http::StatusCode as HttpStatusCode;
 use reqwest::StatusCode;
 use std::time::Duration;
-use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::tungstenite::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
@@ -928,13 +930,21 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
-            || self.state.disable_websockets.load(Ordering::Relaxed)
+        #[cfg(target_arch = "wasm32")]
         {
-            return false;
+            false
         }
 
-        true
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !self.state.provider.info().supports_websockets
+                || self.state.disable_websockets.load(Ordering::Relaxed)
+            {
+                return false;
+            }
+
+            true
+        }
     }
 
     /// Returns auth + provider configuration resolved from the current session auth state.
@@ -1956,7 +1966,7 @@ where
     let consumer_dropped = CancellationToken::new();
     let consumer_dropped_for_stream = consumer_dropped.clone();
 
-    tokio::spawn(async move {
+    let task = async move {
         let mut logged_error = false;
         let mut tx_last_response = Some(tx_last_response);
         let mut items_added: Vec<ResponseItem> = Vec::new();
@@ -2074,7 +2084,11 @@ where
             upstream_request_id,
             &items_added,
         );
-    });
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::spawn(task);
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(task);
 
     (
         ResponseStream {
@@ -2423,6 +2437,7 @@ impl WebsocketTelemetry for ApiTelemetry {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_ws_event(
         &self,
         result: &std::result::Result<Option<std::result::Result<Message, Error>>, ApiError>,
@@ -2430,6 +2445,14 @@ impl WebsocketTelemetry for ApiTelemetry {
     ) {
         self.session_telemetry
             .record_websocket_event(result, duration);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn on_ws_event(
+        &self,
+        _result: &std::result::Result<Option<std::result::Result<(), ApiError>>, ApiError>,
+        _duration: Duration,
+    ) {
     }
 }
 

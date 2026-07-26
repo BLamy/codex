@@ -7,9 +7,16 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::web::SystemTimeExt;
 
 use anyhow::Context;
 use anyhow::anyhow;
@@ -161,7 +168,12 @@ fn read_bounded_cache_file(cache_path: &Path) -> anyhow::Result<(Vec<u8>, System
             CODEX_APPS_TOOLS_CACHE_MAX_BYTES
         ));
     }
-    Ok((bytes, metadata.modified().unwrap_or(UNIX_EPOCH)))
+    let modified_at = metadata
+        .modified()
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    #[cfg(target_arch = "wasm32")]
+    let modified_at = SystemTime::from_std(modified_at);
+    Ok((bytes, modified_at))
 }
 
 fn write_codex_apps_cache_file(

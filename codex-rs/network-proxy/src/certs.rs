@@ -34,10 +34,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 use tracing::info;
 use tracing::warn;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 pub(super) struct ManagedMitmCa {
     issuer: Issuer<'static, KeyPair>,

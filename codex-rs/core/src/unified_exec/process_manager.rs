@@ -353,7 +353,7 @@ fn terminate_process_on_network_denial(
 ) {
     let network_cancelled = deferred.cancellation_token();
     let process_exited = process.cancellation_token();
-    tokio::spawn(async move {
+    let network_denial_task = async move {
         let denied = tokio::select! {
             _ = network_cancelled.cancelled() => true,
             _ = process_exited.cancelled() => {
@@ -366,7 +366,11 @@ fn terminate_process_on_network_denial(
         let session = session.upgrade();
         let message = network_denial_message_for_session(session.as_ref(), Some(deferred)).await;
         process.fail_and_terminate(message);
-    });
+    };
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(network_denial_task);
+    #[cfg(not(target_arch = "wasm32"))]
+    drop(tokio::spawn(network_denial_task));
 }
 
 impl UnifiedExecProcessManager {
@@ -967,7 +971,7 @@ impl UnifiedExecProcessManager {
         spawn_lifecycle: SpawnLifecycleHandle,
         environment: &codex_exec_server::Environment,
     ) -> Result<UnifiedExecProcess, ToolError> {
-        let mut request = if environment.is_remote() {
+        let mut request = if environment.is_remote() || cfg!(target_arch = "wasm32") {
             attempt.env_for_exec_server(command, options)
         } else {
             attempt.env_for(command, options, network, environment_id)
@@ -1004,11 +1008,14 @@ impl UnifiedExecProcessManager {
     ) -> Result<UnifiedExecProcess, UnifiedExecError> {
         let inherited_fds = spawn_lifecycle.inherited_fds();
 
-        if environment.is_remote() {
+        if environment.is_remote() || cfg!(target_arch = "wasm32") {
             if !inherited_fds.is_empty() {
-                return Err(UnifiedExecError::create_process(
-                    "remote exec-server does not support inherited file descriptors".to_string(),
-                ));
+                let message = if environment.is_remote() {
+                    "remote exec-server does not support inherited file descriptors"
+                } else {
+                    "browser host process spawning does not support inherited file descriptors"
+                };
+                return Err(UnifiedExecError::create_process(message.to_string()));
             }
 
             let started = environment

@@ -11,7 +11,10 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use codex_utils_home_dir::find_codex_home;
 

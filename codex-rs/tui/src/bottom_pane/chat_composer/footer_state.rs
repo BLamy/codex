@@ -1,6 +1,9 @@
 //! Footer and status-row presentation state for the chat composer.
 
-use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use ratatui::text::Line;
 

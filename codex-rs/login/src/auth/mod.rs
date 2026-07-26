@@ -1,10 +1,12 @@
 mod access_token;
+#[cfg_attr(target_arch = "wasm32", path = "agent_identity_wasm.rs")]
 mod agent_identity;
 mod auth_headers;
 mod bedrock_api_key;
 pub mod default_client;
 pub mod error;
 mod personal_access_token;
+#[cfg_attr(target_arch = "wasm32", path = "storage_wasm.rs")]
 mod storage;
 mod util;
 

@@ -365,10 +365,19 @@ pub(crate) fn web_destination(destination: &str) -> Option<String> {
     Some(safe_destination)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn trusted_file_destination(destination: &str) -> Option<String> {
     let safe_destination = sanitized_destination(destination);
     let parsed = Url::parse(&safe_destination).ok()?;
     (parsed.scheme() == "file" && parsed.to_file_path().is_ok()).then_some(safe_destination)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn trusted_file_destination(destination: &str) -> Option<String> {
+    let safe_destination = sanitized_destination(destination);
+    codex_utils_path_uri::PathUri::parse(&safe_destination)
+        .ok()
+        .map(|_| safe_destination)
 }
 
 fn sanitized_destination(destination: &str) -> String {

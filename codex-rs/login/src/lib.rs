@@ -2,24 +2,39 @@ pub mod auth;
 pub mod auth_env_telemetry;
 pub mod token_data;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod device_code_auth;
 mod outbound_proxy;
+#[cfg(not(target_arch = "wasm32"))]
 mod pkce;
+#[cfg(not(target_arch = "wasm32"))]
 mod server;
+#[cfg(not(target_arch = "wasm32"))]
 mod success_page;
 
 pub use codex_config::types::AuthCredentialsStoreMode;
 pub use codex_http_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use device_code_auth::DeviceCode;
+#[cfg(not(target_arch = "wasm32"))]
 pub use device_code_auth::complete_device_code_login;
+#[cfg(not(target_arch = "wasm32"))]
 pub use device_code_auth::request_device_code;
+#[cfg(not(target_arch = "wasm32"))]
 pub use device_code_auth::run_device_code_login;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::LoginServer;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::ServerOptions;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::ShutdownHandle;
+#[cfg(not(target_arch = "wasm32"))]
 pub use server::run_login_server;
+#[cfg(not(target_arch = "wasm32"))]
 pub use success_page::CODEX_OPEN_APP_URL;
+#[cfg(not(target_arch = "wasm32"))]
 pub use success_page::LoginSuccessPage;
+#[cfg(not(target_arch = "wasm32"))]
 pub use success_page::LoginSuccessPageBrand;
 
 pub use auth::AgentIdentityAuthPolicy;

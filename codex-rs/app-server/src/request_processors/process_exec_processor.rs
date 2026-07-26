@@ -94,6 +94,10 @@ impl ProcessExecRequestProcessor {
         if size.is_some() && !tty {
             return Err(invalid_params("process/spawn size requires tty: true"));
         }
+        #[cfg(target_arch = "wasm32")]
+        let mut env = HashMap::new();
+
+        #[cfg(not(target_arch = "wasm32"))]
         let mut env = std::env::vars().collect::<HashMap<_, _>>();
         if let Some(env_overrides) = env_overrides {
             for (key, value) in env_overrides {

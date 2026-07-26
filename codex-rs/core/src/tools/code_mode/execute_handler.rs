@@ -1,4 +1,5 @@
 use crate::function_tool::FunctionCallError;
+use crate::time::Instant;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -38,7 +39,7 @@ impl CodeModeExecuteHandler {
         let exec = ExecContext { session, turn };
         let enabled_tools =
             codex_tools::collect_code_mode_tool_definitions(&self.nested_tool_specs);
-        let started_at = std::time::Instant::now();
+        let started_at = Instant::now();
         let started_cell = exec
             .session
             .services

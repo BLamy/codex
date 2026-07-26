@@ -73,6 +73,9 @@ impl PathUri {
     /// The encoded null reserves a URI namespace that cannot collide with a
     /// real path on Unix or Windows.
     pub fn from_abs_path(path: &AbsolutePathBuf) -> Self {
+        // `Url::from_file_path` is unavailable on wasm32-unknown-unknown; wasm
+        // paths always take the lossless opaque-byte fallback below.
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(url) = Url::from_file_path(path.as_path())
             && let Ok(uri) = Self::try_from(url)
         {
@@ -93,6 +96,13 @@ impl PathUri {
                 .flat_map(u16::to_le_bytes)
                 .collect::<Vec<_>>()
         };
+        #[cfg(all(not(unix), not(windows)))]
+        let path_bytes = path
+            .as_path()
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned()
+            .into_bytes();
         Self::from_opaque_path_bytes(&path_bytes)
     }
 
@@ -403,6 +413,10 @@ impl PathUri {
                     std::path::PathBuf::from(std::ffi::OsString::from_wide(&path_wide))
                 })
             };
+            #[cfg(all(not(unix), not(windows)))]
+            let decoded_path = String::from_utf8(path_bytes)
+                .ok()
+                .map(std::path::PathBuf::from);
             if let Some(decoded_path) = decoded_path
                 && let Ok(path) = AbsolutePathBuf::from_absolute_path_checked(decoded_path)
                 && Self::from_abs_path(&path).eq(self)
@@ -418,22 +432,48 @@ impl PathUri {
             ));
         }
 
-        let path = self.0.to_file_path().map_err(|()| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                PathUriParseError::InvalidFileUriPath {
-                    path: self.to_string(),
-                },
-            )
-        })?;
-        AbsolutePathBuf::from_absolute_path_checked(path).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                PathUriParseError::InvalidFileUriPath {
-                    path: self.to_string(),
-                },
-            )
-        })
+        // `Url::to_file_path` is unavailable on wasm32-unknown-unknown. The browser
+        // runtime exposes a POSIX virtual filesystem, so render an ordinary POSIX
+        // `file:` URI using the same typed conversion used at app-server boundaries.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let path =
+                LegacyAppPathString::from_path_uri(self, PathConvention::Posix).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        PathUriParseError::InvalidFileUriPath {
+                            path: self.to_string(),
+                        },
+                    )
+                })?;
+            AbsolutePathBuf::from_absolute_path_checked(path.as_str()).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    PathUriParseError::InvalidFileUriPath {
+                        path: self.to_string(),
+                    },
+                )
+            })
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = self.0.to_file_path().map_err(|()| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    PathUriParseError::InvalidFileUriPath {
+                        path: self.to_string(),
+                    },
+                )
+            })?;
+            AbsolutePathBuf::from_absolute_path_checked(path).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    PathUriParseError::InvalidFileUriPath {
+                        path: self.to_string(),
+                    },
+                )
+            })
+        }
     }
 
     /// Returns a clone of the canonical URL.
@@ -727,6 +767,14 @@ impl PathConvention {
 
     /// Returns the path convention used by the current process.
     #[cfg(unix)]
+    pub const fn native() -> Self {
+        Self::Posix
+    }
+
+    /// Returns the path convention used by the current process.
+    ///
+    /// wasm targets have no native filesystem; treat paths as POSIX.
+    #[cfg(all(not(unix), not(windows)))]
     pub const fn native() -> Self {
         Self::Posix
     }

@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::time::Instant;
 use codex_config::config_toml::ConfigToml;
 use codex_config::types::WindowsSandboxModeToml;
 use codex_features::Feature;
@@ -14,7 +15,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Instant;
 
 pub trait WindowsSandboxLevelExt {
     fn from_config(config: &Config) -> WindowsSandboxLevel;

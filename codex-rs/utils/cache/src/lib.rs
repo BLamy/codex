@@ -123,8 +123,16 @@ fn lock_if_runtime<K, V>(m: &Mutex<LruCache<K, V>>) -> Option<MutexGuard<'_, Lru
 where
     K: Eq + Hash,
 {
-    tokio::runtime::Handle::try_current().ok()?;
-    Some(tokio::task::block_in_place(|| m.blocking_lock()))
+    #[cfg(target_arch = "wasm32")]
+    {
+        return m.try_lock().ok();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::runtime::Handle::try_current().ok()?;
+        Some(tokio::task::block_in_place(|| m.blocking_lock()))
+    }
 }
 
 /// Computes the SHA-1 digest of `bytes`.

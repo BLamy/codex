@@ -15,7 +15,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;

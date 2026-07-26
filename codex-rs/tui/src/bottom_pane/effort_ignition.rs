@@ -12,7 +12,7 @@
 
 use std::cell::Cell;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use codex_protocol::openai_models::ReasoningEffort;
 use rand::Rng as _;

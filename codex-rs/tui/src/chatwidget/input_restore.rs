@@ -7,6 +7,14 @@ use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
 
 impl ChatWidget {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn replace_browser_composer_text(&mut self, text: String) {
+        self.restore_composer_state(ThreadComposerState {
+            text,
+            ..ThreadComposerState::default()
+        });
+    }
+
     pub(crate) fn set_initial_user_message_submit_suppressed(&mut self, suppressed: bool) {
         self.suppress_initial_user_message_submit = suppressed;
     }

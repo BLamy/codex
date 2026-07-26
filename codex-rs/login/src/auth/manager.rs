@@ -16,11 +16,15 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 use tokio::sync::Semaphore;
 use tokio::sync::watch;
 use tracing::instrument;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
+#[cfg(not(target_arch = "wasm32"))]
 use codex_agent_identity::ChatGptEnvironment;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
@@ -193,6 +197,17 @@ pub const REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REVOKE_TOKEN_URL_OVER
 pub const CLIENT_ID_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_LOGIN_CLIENT_ID";
 static NEXT_DUMMY_AUTH_ID: AtomicU64 = AtomicU64::new(1);
 
+fn default_chatgpt_base_url() -> &'static str {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        ChatGptEnvironment::default().chatgpt_base_url()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        "https://chatgpt.com/backend-api"
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RefreshTokenError {
     #[error("{0}")]
@@ -267,7 +282,7 @@ impl CodexAuth {
                 ));
             };
             let base_url = chatgpt_base_url
-                .unwrap_or(ChatGptEnvironment::default().chatgpt_base_url())
+                .unwrap_or(default_chatgpt_base_url())
                 .trim_end_matches('/')
                 .to_string();
             let agent_identity_authapi_base_url =
@@ -390,7 +405,7 @@ impl CodexAuth {
         auth_route_config: Option<&AuthRouteConfig>,
     ) -> std::io::Result<Self> {
         let base_url = chatgpt_base_url
-            .unwrap_or(ChatGptEnvironment::default().chatgpt_base_url())
+            .unwrap_or(default_chatgpt_base_url())
             .trim_end_matches('/')
             .to_string();
         Ok(Self::AgentIdentity(
@@ -953,7 +968,7 @@ pub async fn login_with_access_token(
         }
         CodexAccessToken::AgentIdentityJwt(jwt) => {
             let base_url = chatgpt_base_url
-                .unwrap_or(ChatGptEnvironment::default().chatgpt_base_url())
+                .unwrap_or(default_chatgpt_base_url())
                 .trim_end_matches('/')
                 .to_string();
             verified_record_from_jwt(jwt, &base_url, auth_route_config).await?;
@@ -980,8 +995,23 @@ fn ensure_personal_access_token_workspace_allowed(
     expected_workspace_ids: Option<&[String]>,
     auth: &PersonalAccessTokenAuth,
 ) -> std::io::Result<()> {
-    crate::server::ensure_workspace_account_allowed(expected_workspace_ids, auth.account_id())
-        .map_err(|message| std::io::Error::new(std::io::ErrorKind::PermissionDenied, message))
+    let Some(expected_workspace_ids) = expected_workspace_ids else {
+        return Ok(());
+    };
+    if expected_workspace_ids
+        .iter()
+        .any(|workspace_id| workspace_id == auth.account_id())
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "Login is restricted to workspace id(s) {}.",
+                expected_workspace_ids.join(", ")
+            ),
+        ))
+    }
 }
 
 /// Writes an in-memory auth payload for externally managed ChatGPT tokens.
@@ -1334,6 +1364,31 @@ fn persist_tokens(
 async fn request_chatgpt_token_refresh(
     refresh_token: String,
     client: &HttpClient,
+) -> Result<RefreshResponse, RefreshTokenError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        request_chatgpt_token_refresh_local(refresh_token, client.clone()).await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let client = client.clone();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = request_chatgpt_token_refresh_local(refresh_token, client).await;
+            let _ = sender.send(result);
+        });
+        receiver.await.map_err(|_| {
+            RefreshTokenError::Transient(std::io::Error::other(
+                "browser token refresh task ended before producing a result",
+            ))
+        })?
+    }
+}
+
+async fn request_chatgpt_token_refresh_local(
+    refresh_token: String,
+    client: HttpClient,
 ) -> Result<RefreshResponse, RefreshTokenError> {
     let refresh_request = RefreshRequest {
         client_id: oauth_client_id(),

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::app::app_server_requests::ResolvedAppServerRequest;
 use crossterm::event::KeyCode;

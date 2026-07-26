@@ -45,6 +45,8 @@ use codex_protocol::protocol::SkillScope;
 use codex_skills::SkillConfigRules;
 use codex_skills::SkillMetadata;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_path_uri::PathUri;
 use codex_utils_plugins::find_plugin_manifest_path;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -1210,7 +1212,7 @@ async fn load_apps_from_paths(
 ) -> Vec<AppDeclaration> {
     let mut app_declarations = Vec::new();
     for app_config_path in app_config_paths {
-        let Ok(contents) = tokio::fs::read_to_string(app_config_path.as_path()).await else {
+        let Some(contents) = read_plugin_config_text(&app_config_path).await else {
             continue;
         };
         let declarations = match parse_plugin_app_config(&contents) {
@@ -1352,7 +1354,7 @@ async fn load_mcp_servers_from_file(
     plugin_root: &Path,
     mcp_config_path: &AbsolutePathBuf,
 ) -> PluginMcpDiscovery {
-    let Ok(contents) = tokio::fs::read_to_string(mcp_config_path.as_path()).await else {
+    let Some(contents) = read_plugin_config_text(mcp_config_path).await else {
         return PluginMcpDiscovery::default();
     };
     let parsed = match parse_plugin_mcp_config(plugin_root, &contents) {
@@ -1376,6 +1378,22 @@ async fn load_mcp_servers_from_file(
     }
     PluginMcpDiscovery {
         mcp_servers: parsed.servers.into_iter().collect(),
+    }
+}
+
+async fn read_plugin_config_text(path: &AbsolutePathBuf) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use codex_exec_server::LOCAL_FS;
+        LOCAL_FS
+            .read_file_text(&PathUri::from_abs_path(path), /*sandbox*/ None)
+            .await
+            .ok()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::fs::read_to_string(path.as_path()).await.ok()
     }
 }
 

@@ -1,3 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod command_runner;
+#[cfg(target_arch = "wasm32")]
+#[path = "command_runner_wasm.rs"]
 pub(crate) mod command_runner;
 pub(crate) mod discovery;
 pub(crate) mod dispatcher;

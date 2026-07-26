@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use anyhow::anyhow;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -51,18 +54,32 @@ pub fn notify_hook(argv: Vec<String>) -> Hook {
                     Some(command) => command,
                     None => return HookResult::Success,
                 };
-                if let Ok(notify_payload) = legacy_notify_json(payload) {
-                    command.arg(notify_payload);
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = payload;
+                    let _ = command;
+                    return HookResult::FailedContinue(
+                        anyhow!("browser hook execution requires an almostnode host process shim")
+                            .into(),
+                    );
                 }
 
-                command
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null());
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Ok(notify_payload) = legacy_notify_json(payload) {
+                        command.arg(notify_payload);
+                    }
 
-                match command.spawn() {
-                    Ok(_) => HookResult::Success,
-                    Err(err) => HookResult::FailedContinue(err.into()),
+                    command
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+
+                    match command.spawn() {
+                        Ok(_) => HookResult::Success,
+                        Err(err) => HookResult::FailedContinue(err.into()),
+                    }
                 }
             })
         }),

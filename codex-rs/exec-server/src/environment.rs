@@ -7,6 +7,7 @@ use std::sync::RwLock;
 
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::FutureExt;
 
 use crate::CapabilityRootsDiscoverParams;
@@ -17,7 +18,9 @@ use crate::ExecutorFileSystem;
 use crate::HttpClient;
 use crate::NoiseChannelIdentity;
 use crate::NoiseRendezvousConnectProvider;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::LazyRemoteExecServerClient;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::http_client::ReqwestHttpClient;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
@@ -26,14 +29,26 @@ use crate::environment_provider::EnvironmentDefault;
 use crate::environment_provider::EnvironmentProvider;
 use crate::environment_provider::EnvironmentProviderSnapshot;
 use crate::environment_provider::normalize_exec_server_url;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::environment_toml::environment_provider_from_codex_home;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::local_file_system::LocalFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::local_process::LocalProcess;
 use crate::process::ExecBackend;
 use crate::protocol::EnvironmentInfo;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::remote::NoiseRendezvousEnvironmentConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::remote_file_system::RemoteFileSystem;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::remote_process::RemoteProcess;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostFileSystem as LocalFileSystem;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostHttpClient as ReqwestHttpClient;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_host::WasmHostProcess as LocalProcess;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio_util::task::AbortOnDropHandle;
@@ -165,11 +180,20 @@ impl EnvironmentManager {
         codex_home: impl AsRef<std::path::Path>,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
     ) -> Result<Self, ExecServerError> {
-        if let Some(config) = noise_environment_config_from_env()? {
-            return Self::from_noise_environment_config(config, local_runtime_paths);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(config) = noise_environment_config_from_env()? {
+                return Self::from_noise_environment_config(config, local_runtime_paths);
+            }
+            let provider = environment_provider_from_codex_home(codex_home.as_ref())?;
+            return Self::from_snapshot(provider.snapshot().await?, local_runtime_paths);
         }
-        let provider = environment_provider_from_codex_home(codex_home.as_ref())?;
-        Self::from_snapshot(provider.snapshot().await?, local_runtime_paths)
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = codex_home;
+            Self::from_env(local_runtime_paths).await
+        }
     }
 
     /// Builds a manager from the legacy environment-variable provider without
@@ -177,6 +201,7 @@ impl EnvironmentManager {
     pub async fn from_env(
         local_runtime_paths: Option<ExecServerRuntimePaths>,
     ) -> Result<Self, ExecServerError> {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(config) = noise_environment_config_from_env()? {
             return Self::from_noise_environment_config(config, local_runtime_paths);
         }
@@ -195,6 +220,7 @@ impl EnvironmentManager {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn from_noise_environment_config(
         config: NoiseRendezvousEnvironmentConfig,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
@@ -359,17 +385,28 @@ impl EnvironmentManager {
         exec_server_url: String,
         connect_timeout: Option<std::time::Duration>,
     ) -> Result<(), ExecServerError> {
-        validate_environment_id(&environment_id)?;
-        let exec_server_url = validate_remote_exec_server_url(exec_server_url)?;
-        let environment = Arc::new(Environment::remote_with_transport(
-            ExecServerTransportParams::websocket_url(
-                exec_server_url,
-                connect_timeout.unwrap_or(DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT),
-            ),
-            self.local_runtime_paths.clone(),
-        ));
-        self.insert_environment(environment_id, environment);
-        Ok(())
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (exec_server_url, connect_timeout);
+            return Err(ExecServerError::Protocol(format!(
+                "remote exec-server environments are unavailable in browser wasm for `{environment_id}`"
+            )));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            validate_environment_id(&environment_id)?;
+            let exec_server_url = validate_remote_exec_server_url(exec_server_url)?;
+            let environment = Arc::new(Environment::remote_with_transport(
+                ExecServerTransportParams::websocket_url(
+                    exec_server_url,
+                    connect_timeout.unwrap_or(DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT),
+                ),
+                self.local_runtime_paths.clone(),
+            ));
+            self.insert_environment(environment_id, environment);
+            Ok(())
+        }
     }
 
     /// Adds or replaces a Noise rendezvous environment that will become ready later.
@@ -378,25 +415,36 @@ impl EnvironmentManager {
         environment_id: String,
         provider: Arc<dyn NoiseRendezvousConnectProvider>,
     ) -> Result<DeferredEnvironmentRegistration, ExecServerError> {
-        validate_environment_id(&environment_id)?;
-        let identity = noise_channel_identity()?;
-        let (completion, readiness) = oneshot::channel();
-        let ready_info = Arc::new(OnceLock::new());
-        let mut environment = Environment::remote_with_transport(
-            ExecServerTransportParams::Deferred(Box::new(crate::client_api::Deferred {
-                readiness: readiness.shared(),
-                transport: ExecServerTransportParams::NoiseRendezvous { provider, identity },
-            })),
-            self.local_runtime_paths.clone(),
-        );
-        environment.ready_info = Some(Arc::clone(&ready_info));
-        let environment = Arc::new(environment);
-        self.insert_environment(environment_id.clone(), environment);
-        Ok(DeferredEnvironmentRegistration {
-            completion,
-            environment_id,
-            ready_info,
-        })
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = provider;
+            return Err(ExecServerError::Protocol(format!(
+                "deferred Noise environments are unavailable in browser wasm for `{environment_id}`"
+            )));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            validate_environment_id(&environment_id)?;
+            let identity = noise_channel_identity()?;
+            let (completion, readiness) = oneshot::channel();
+            let ready_info = Arc::new(OnceLock::new());
+            let mut environment = Environment::remote_with_transport(
+                ExecServerTransportParams::Deferred(Box::new(crate::client_api::Deferred {
+                    readiness: readiness.shared(),
+                    transport: ExecServerTransportParams::NoiseRendezvous { provider, identity },
+                })),
+                self.local_runtime_paths.clone(),
+            );
+            environment.ready_info = Some(Arc::clone(&ready_info));
+            let environment = Arc::new(environment);
+            self.insert_environment(environment_id.clone(), environment);
+            Ok(DeferredEnvironmentRegistration {
+                completion,
+                environment_id,
+                ready_info,
+            })
+        }
     }
 
     /// Adds or replaces a named remote environment that connects through an
@@ -409,16 +457,28 @@ impl EnvironmentManager {
         environment_id: String,
         provider: Arc<dyn NoiseRendezvousConnectProvider>,
     ) -> Result<(), ExecServerError> {
-        validate_environment_id(&environment_id)?;
-        let identity = noise_channel_identity()?;
-        let environment = Arc::new(Environment::remote_with_transport(
-            ExecServerTransportParams::NoiseRendezvous { provider, identity },
-            self.local_runtime_paths.clone(),
-        ));
-        self.insert_environment(environment_id, environment);
-        Ok(())
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = provider;
+            return Err(ExecServerError::Protocol(format!(
+                "Noise environments are unavailable in browser wasm for `{environment_id}`"
+            )));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            validate_environment_id(&environment_id)?;
+            let identity = noise_channel_identity()?;
+            let environment = Arc::new(Environment::remote_with_transport(
+                ExecServerTransportParams::NoiseRendezvous { provider, identity },
+                self.local_runtime_paths.clone(),
+            ));
+            self.insert_environment(environment_id, environment);
+            Ok(())
+        }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn insert_environment(&self, environment_id: String, environment: Arc<Environment>) {
         self.environments
             .write()
@@ -476,6 +536,7 @@ impl DeferredEnvironmentRegistration {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn noise_channel_identity() -> Result<NoiseChannelIdentity, ExecServerError> {
     NoiseChannelIdentity::generate().map_err(|error| {
         ExecServerError::Protocol(format!(
@@ -484,6 +545,7 @@ fn noise_channel_identity() -> Result<NoiseChannelIdentity, ExecServerError> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_environment_id(environment_id: &str) -> Result<(), ExecServerError> {
     if environment_id.is_empty() {
         return Err(ExecServerError::Protocol(
@@ -493,6 +555,7 @@ fn validate_environment_id(environment_id: &str) -> Result<(), ExecServerError> 
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_remote_exec_server_url(exec_server_url: String) -> Result<String, ExecServerError> {
     let (exec_server_url, disabled) = normalize_exec_server_url(Some(exec_server_url));
     if disabled {
@@ -505,6 +568,7 @@ fn validate_remote_exec_server_url(exec_server_url: String) -> Result<String, Ex
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn noise_environment_config_from_env()
 -> Result<Option<NoiseRendezvousEnvironmentConfig>, ExecServerError> {
     noise_environment_config_from_values(
@@ -515,6 +579,7 @@ fn noise_environment_config_from_env()
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn noise_environment_config_from_values(
     registry_url: Option<String>,
     environment_id: Option<String>,
@@ -558,7 +623,10 @@ fn optional_environment_value(name: &str) -> Option<String> {
 /// paths used by filesystem helpers.
 #[derive(Clone)]
 pub struct Environment {
+    #[cfg(not(target_arch = "wasm32"))]
     remote_client: Option<LazyRemoteExecServerClient>,
+    #[cfg(target_arch = "wasm32")]
+    remote_client: Option<()>,
     ready_info: Option<Arc<OnceLock<EnvironmentReadyInfo>>>,
     // Dropping the environment stops unfinished background startup work.
     startup_task: Arc<Mutex<Option<AbortOnDropHandle<()>>>>,
@@ -571,14 +639,30 @@ pub struct Environment {
 impl Environment {
     /// Builds a test-only local environment without configured sandbox helper paths.
     pub fn default_for_tests() -> Self {
-        Self {
-            remote_client: None,
-            ready_info: None,
-            startup_task: Arc::new(Mutex::new(None)),
-            exec_backend: Arc::new(LocalProcess::default()),
-            filesystem: Arc::new(LocalFileSystem::unsandboxed()),
-            http_client: Arc::new(ReqwestHttpClient),
-            local_runtime_paths: None,
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self {
+                remote_client: None,
+                ready_info: None,
+                startup_task: Arc::new(Mutex::new(None)),
+                exec_backend: Arc::new(LocalProcess),
+                filesystem: Arc::new(LocalFileSystem),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: None,
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                remote_client: None,
+                ready_info: None,
+                startup_task: Arc::new(Mutex::new(None)),
+                exec_backend: Arc::new(LocalProcess::default()),
+                filesystem: Arc::new(LocalFileSystem::unsandboxed()),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: None,
+            }
         }
     }
 }
@@ -617,7 +701,13 @@ impl Environment {
         }
 
         Ok(match exec_server_url {
+            #[cfg(not(target_arch = "wasm32"))]
             Some(exec_server_url) => Self::remote_inner(exec_server_url, local_runtime_paths),
+            #[cfg(target_arch = "wasm32")]
+            Some(_exec_server_url) => match local_runtime_paths {
+                Some(local_runtime_paths) => Self::local(local_runtime_paths),
+                None => Self::default_for_tests(),
+            },
             None => match local_runtime_paths {
                 Some(local_runtime_paths) => Self::local(local_runtime_paths),
                 None => Self::default_for_tests(),
@@ -626,21 +716,38 @@ impl Environment {
     }
 
     pub(crate) fn local(local_runtime_paths: ExecServerRuntimePaths) -> Self {
-        Self {
-            remote_client: None,
-            ready_info: None,
-            startup_task: Arc::new(Mutex::new(None)),
-            exec_backend: Arc::new(LocalProcess::with_local_runtime_paths(
-                local_runtime_paths.clone(),
-            )),
-            filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
-                local_runtime_paths.clone(),
-            )),
-            http_client: Arc::new(ReqwestHttpClient),
-            local_runtime_paths: Some(local_runtime_paths),
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self {
+                remote_client: None,
+                ready_info: None,
+                startup_task: Arc::new(Mutex::new(None)),
+                exec_backend: Arc::new(LocalProcess),
+                filesystem: Arc::new(LocalFileSystem),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: Some(local_runtime_paths),
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                remote_client: None,
+                ready_info: None,
+                startup_task: Arc::new(Mutex::new(None)),
+                exec_backend: Arc::new(LocalProcess::with_local_runtime_paths(
+                    local_runtime_paths.clone(),
+                )),
+                filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
+                    local_runtime_paths.clone(),
+                )),
+                http_client: Arc::new(ReqwestHttpClient),
+                local_runtime_paths: Some(local_runtime_paths),
+            }
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_inner(
         exec_server_url: String,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
@@ -654,6 +761,7 @@ impl Environment {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_with_transport(
         remote_transport: ExecServerTransportParams,
         local_runtime_paths: Option<ExecServerRuntimePaths>,
@@ -692,9 +800,16 @@ impl Environment {
     pub fn subscribe_connection_state(
         &self,
     ) -> Option<watch::Receiver<EnvironmentConnectionState>> {
-        self.remote_client
-            .as_ref()
-            .map(LazyRemoteExecServerClient::subscribe_connection_state)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.remote_client
+                .as_ref()
+                .map(LazyRemoteExecServerClient::subscribe_connection_state)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            None
+        }
     }
 
     pub fn local_runtime_paths(&self) -> Option<&ExecServerRuntimePaths> {
@@ -703,10 +818,11 @@ impl Environment {
 
     /// Returns environment information from the selected execution/filesystem environment.
     pub async fn info(&self) -> Result<EnvironmentInfo, ExecServerError> {
-        match &self.remote_client {
-            Some(client) => client.environment_info().await,
-            None => Ok(EnvironmentInfo::local()),
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return client.environment_info().await;
         }
+        Ok(EnvironmentInfo::local())
     }
 
     /// Discovers plugin and skill manifests through the environment's high-level discovery API.
@@ -714,69 +830,94 @@ impl Environment {
         &self,
         params: CapabilityRootsDiscoverParams,
     ) -> Result<CapabilityRootsDiscoverResponse, ExecServerError> {
-        match &self.remote_client {
-            Some(client) => client.get().await?.discover_capability_roots(params).await,
-            None => crate::discover_capability_roots(self.filesystem.as_ref(), params)
-                .await
-                .map_err(|error| ExecServerError::Protocol(error.to_string())),
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return client.get().await?.discover_capability_roots(params).await;
         }
+        crate::discover_capability_roots(self.filesystem.as_ref(), params)
+            .await
+            .map_err(|error| ExecServerError::Protocol(error.to_string()))
     }
 
     /// Starts connecting a remote environment without waiting for it.
     /// Requires an active Tokio runtime when background startup is supported.
     pub fn start_connecting(&self) {
-        let Some(client) = &self.remote_client else {
+        #[cfg(target_arch = "wasm32")]
+        {
             return;
-        };
-        let mut startup_task = self
-            .startup_task
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if startup_task.is_none() {
-            *startup_task = client.start_connecting();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(client) = &self.remote_client else {
+                return;
+            };
+            let mut startup_task = self
+                .startup_task
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if startup_task.is_none() {
+                *startup_task = client.start_connecting();
+            }
         }
     }
 
     /// Starts the initial connection after an environment is actually selected for use.
     pub(crate) fn start_connecting_for_use(environment: &Arc<Self>) {
-        if environment.remote_client.is_none() {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = environment;
             return;
         }
-        let mut startup_task = environment
-            .startup_task
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if startup_task.is_none() {
-            let environment = Arc::clone(environment);
-            *startup_task = Some(AbortOnDropHandle::new(tokio::spawn(async move {
-                if let Err(error) = environment.wait_until_ready().await {
-                    tracing::debug!(%error, "exec-server environment startup failed");
-                }
-            })));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if environment.remote_client.is_none() {
+                return;
+            }
+            let mut startup_task = environment
+                .startup_task
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if startup_task.is_none() {
+                let environment = Arc::clone(environment);
+                *startup_task = Some(AbortOnDropHandle::new(tokio::spawn(async move {
+                    if let Err(error) = environment.wait_until_ready().await {
+                        tracing::debug!(%error, "exec-server environment startup failed");
+                    }
+                })));
+            }
         }
     }
 
     /// Returns whether initial startup has either succeeded or permanently failed.
     pub fn startup_finished(&self) -> bool {
-        self.remote_client
-            .as_ref()
-            .is_none_or(LazyRemoteExecServerClient::startup_finished)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.remote_client
+                .as_ref()
+                .is_none_or(LazyRemoteExecServerClient::startup_finished)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            true
+        }
     }
 
     /// Waits for initial startup. A failed startup is never attempted again.
     pub async fn wait_until_ready(&self) -> Result<(), ExecServerError> {
-        match &self.remote_client {
-            Some(client) => client.wait_until_ready().await,
-            None => Ok(()),
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return client.wait_until_ready().await;
         }
+        Ok(())
     }
 
     /// Returns whether the environment can serve a request without waiting or reconnecting.
     pub(crate) fn readiness_result(&self) -> Option<Result<(), ExecServerError>> {
-        match &self.remote_client {
-            Some(client) => client.readiness_result(),
-            None => Some(Ok(())),
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return client.readiness_result();
         }
+        Some(Ok(()))
     }
 
     /// Returns the environment's status without starting or recovering it.
@@ -786,10 +927,11 @@ impl Environment {
     /// probe; other remote states are returned from cached connection state
     /// without waiting for startup or recovery.
     pub async fn status(&self) -> EnvironmentObservedStatus {
-        match &self.remote_client {
-            Some(client) => client.status().await,
-            None => EnvironmentObservedStatus::Ready,
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return client.status().await;
         }
+        EnvironmentObservedStatus::Ready
     }
 
     pub fn get_exec_backend(&self) -> Arc<dyn ExecBackend> {
@@ -806,10 +948,11 @@ impl Environment {
 
     /// Returns a filesystem view that fails instead of starting or waiting for a connection.
     pub fn get_filesystem_without_reconnect(&self) -> Arc<dyn ExecutorFileSystem> {
-        match &self.remote_client {
-            Some(client) => Arc::new(RemoteFileSystem::new(client.fail_fast())),
-            None => Arc::clone(&self.filesystem),
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(client) = &self.remote_client {
+            return Arc::new(RemoteFileSystem::new(client.fail_fast()));
         }
+        Arc::clone(&self.filesystem)
     }
 }
 

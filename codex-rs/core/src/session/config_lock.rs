@@ -4,6 +4,10 @@ use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::OrchestratorFeatureToml;
 use codex_config::config_toml::OrchestratorToml;
 use codex_config::types::MemoriesToml;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::CreateDirectoryOptions;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LOCAL_FS;
 use codex_features::CurrentTimeReminderConfigToml;
 use codex_features::Feature;
 use codex_features::FeatureToml;
@@ -12,6 +16,8 @@ use codex_features::MultiAgentV2ConfigToml;
 use codex_features::RolloutBudgetConfigToml;
 use codex_features::TokenBudgetConfigToml;
 use codex_protocol::ThreadId;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_path_uri::PathUri;
 
 use crate::config::Config;
 use crate::config_lock::ConfigLockReplayOptions;
@@ -58,17 +64,45 @@ pub(crate) async fn export_config_lock_if_configured(
     let lock = toml::to_string_pretty(&lock).context("failed to serialize config lock")?;
     let path = export_dir.join(format!("{conversation_id}.config.lock.toml"));
 
-    tokio::fs::create_dir_all(export_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to create config lock export directory {}",
-                export_dir.display()
+    #[cfg(target_arch = "wasm32")]
+    {
+        LOCAL_FS
+            .create_directory(
+                &PathUri::from_abs_path(export_dir),
+                CreateDirectoryOptions { recursive: true },
+                /*sandbox*/ None,
             )
-        })?;
-    tokio::fs::write(&path, lock)
-        .await
-        .with_context(|| format!("failed to write config lock to {}", path.display()))?;
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to create config lock export directory {}",
+                    export_dir.display()
+                )
+            })?;
+        LOCAL_FS
+            .write_file(
+                &PathUri::from_abs_path(&path),
+                lock.into_bytes(),
+                /*sandbox*/ None,
+            )
+            .await
+            .with_context(|| format!("failed to write config lock to {}", path.display()))?;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::fs::create_dir_all(export_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to create config lock export directory {}",
+                    export_dir.display()
+                )
+            })?;
+        tokio::fs::write(&path, lock)
+            .await
+            .with_context(|| format!("failed to write config lock to {}", path.display()))?;
+    }
 
     Ok(())
 }

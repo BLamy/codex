@@ -7,6 +7,10 @@
 mod error;
 mod in_memory;
 mod live_thread;
+#[cfg(not(target_arch = "wasm32"))]
+mod local;
+#[cfg(target_arch = "wasm32")]
+#[path = "local_wasm.rs"]
 mod local;
 mod store;
 mod thread_metadata_sync;

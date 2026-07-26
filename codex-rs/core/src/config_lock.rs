@@ -4,7 +4,11 @@ use codex_config::ConfigLayerEntry;
 use codex_config::ConfigLayerSource;
 use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LOCAL_FS;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_path_uri::PathUri;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use similar::TextDiff;
@@ -19,6 +23,17 @@ pub(crate) struct ConfigLockReplayOptions {
 pub(crate) async fn read_config_lock_from_path(
     path: &AbsolutePathBuf,
 ) -> io::Result<ConfigLockfileToml> {
+    #[cfg(target_arch = "wasm32")]
+    let contents = LOCAL_FS
+        .read_file_text(&PathUri::from_abs_path(path), /*sandbox*/ None)
+        .await
+        .map_err(|err| {
+            config_lock_error(format!(
+                "failed to read config lock file {}: {err}",
+                path.display()
+            ))
+        })?;
+    #[cfg(not(target_arch = "wasm32"))]
     let contents = tokio::fs::read_to_string(path).await.map_err(|err| {
         config_lock_error(format!(
             "failed to read config lock file {}: {err}",

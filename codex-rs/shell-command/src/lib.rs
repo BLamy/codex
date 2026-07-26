@@ -2,6 +2,10 @@
 
 pub mod shell_detect;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bash;
+#[cfg(target_arch = "wasm32")]
+#[path = "bash_wasm.rs"]
 pub mod bash;
 pub(crate) mod command_safety;
 pub mod parse_command;

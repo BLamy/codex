@@ -1,5 +1,5 @@
+use crate::time::Instant;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::mcp_tool_call::handle_mcp_tool_call;
@@ -23,6 +23,7 @@ use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSearchSourceInfo;
 use codex_tools::ToolSpec;
 use codex_tools::mcp_tool_to_responses_api_tool;
+use futures::future::BoxFuture;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -167,7 +168,7 @@ impl CoreToolRuntime for McpHandler {
     fn telemetry_tags<'a>(
         &'a self,
         _invocation: &'a ToolInvocation,
-    ) -> futures::future::BoxFuture<'a, ToolTelemetryTags> {
+    ) -> BoxFuture<'a, ToolTelemetryTags> {
         Box::pin(async {
             let mut tags = vec![("mcp_server", self.tool_info.server_name.clone())];
             if let Some(origin) = &self.tool_info.server_origin {

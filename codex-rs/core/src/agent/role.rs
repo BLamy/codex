@@ -19,6 +19,8 @@ use codex_config::ConfigLayerStackOrdering;
 use codex_config::config_toml::ConfigToml;
 use codex_config::loader::resolve_relative_paths_in_config_toml;
 use codex_exec_server::LOCAL_FS;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -95,7 +97,16 @@ async fn load_role_layer_toml(
         let role_config_toml: TomlValue = toml::from_str(&role_config_contents)?;
         (role_config_toml, config.codex_home.as_path())
     } else {
+        #[cfg(not(target_arch = "wasm32"))]
         let role_config_contents = tokio::fs::read_to_string(config_file).await?;
+        #[cfg(target_arch = "wasm32")]
+        let config_file_abs = AbsolutePathBuf::from_absolute_path(config_file.to_path_buf())?;
+        #[cfg(target_arch = "wasm32")]
+        let config_file_uri = codex_utils_path_uri::PathUri::from(config_file_abs);
+        #[cfg(target_arch = "wasm32")]
+        let role_config_contents = LOCAL_FS
+            .read_file_text(&config_file_uri, /*sandbox*/ None)
+            .await?;
         let role_config_base = config_file
             .parent()
             .ok_or(anyhow!("No corresponding config content"))?;

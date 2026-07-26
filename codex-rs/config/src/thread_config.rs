@@ -11,9 +11,26 @@ use toml::Value as TomlValue;
 
 use crate::ConfigLayerEntry;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod remote;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::RemoteThreadConfigLoader;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug)]
+pub struct RemoteThreadConfigLoader {
+    server_url: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RemoteThreadConfigLoader {
+    pub fn new(server_url: impl Into<String>) -> Self {
+        Self {
+            server_url: server_url.into(),
+        }
+    }
+}
 
 /// Context available to implementations when loading thread-scoped config.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -144,6 +161,25 @@ impl ThreadConfigLoader for NoopThreadConfigLoader {
         _context: ThreadConfigContext,
     ) -> ThreadConfigLoaderFuture<'_, Vec<ThreadConfigSource>> {
         Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl ThreadConfigLoader for RemoteThreadConfigLoader {
+    fn load(
+        &self,
+        _context: ThreadConfigContext,
+    ) -> ThreadConfigLoaderFuture<'_, Vec<ThreadConfigSource>> {
+        Box::pin(async move {
+            Err(ThreadConfigLoadError::new(
+                ThreadConfigLoadErrorCode::RequestFailed,
+                None,
+                format!(
+                    "remote thread config loader at {} requires a browser config host shim",
+                    self.server_url
+                ),
+            ))
+        })
     }
 }
 

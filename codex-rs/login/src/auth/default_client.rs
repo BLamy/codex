@@ -13,6 +13,7 @@ use codex_http_client::OutboundProxyPolicy;
 pub use codex_http_client::RequestBuilder as CodexRequestBuilder;
 use codex_http_client::build_reqwest_client_with_custom_ca;
 use codex_http_client::with_chatgpt_cloudflare_cookie_store;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_terminal_detection::user_agent;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
@@ -160,8 +161,10 @@ pub fn is_first_party_chat_originator(originator_value: &str) -> bool {
 
 pub fn get_codex_user_agent() -> String {
     let build_version = env!("CARGO_PKG_VERSION");
+    #[cfg(not(target_arch = "wasm32"))]
     let os_info = os_info::get();
     let originator = originator();
+    #[cfg(not(target_arch = "wasm32"))]
     let prefix = format!(
         "{}/{build_version} ({} {}; {}) {}",
         originator.value.as_str(),
@@ -169,6 +172,11 @@ pub fn get_codex_user_agent() -> String {
         os_info.version(),
         os_info.architecture().unwrap_or("unknown"),
         user_agent()
+    );
+    #[cfg(target_arch = "wasm32")]
+    let prefix = format!(
+        "{}/{build_version} (WebAssembly; browser)",
+        originator.value.as_str()
     );
     let suffix = USER_AGENT_SUFFIX
         .lock()
@@ -298,6 +306,17 @@ pub async fn build_default_reqwest_client_for_route_async(
         .acquire()
         .await
         .map_err(std::io::Error::other)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _permit = permit;
+        return build_default_reqwest_client_for_route(
+            &http_client_factory,
+            &request_url,
+            route_class,
+        )
+        .map_err(std::io::Error::from);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         build_default_reqwest_client_for_route(&http_client_factory, &request_url, route_class)
@@ -308,10 +327,13 @@ pub async fn build_default_reqwest_client_for_route_async(
 }
 
 fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
-    let mut builder = reqwest::Client::builder().default_headers(default_headers());
-    if is_sandboxed() {
-        builder = builder.no_proxy();
-    }
+    let builder = reqwest::Client::builder().default_headers(default_headers());
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = if is_sandboxed() {
+        builder.no_proxy()
+    } else {
+        builder
+    };
     with_chatgpt_cloudflare_cookie_store(builder)
 }
 

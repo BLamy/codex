@@ -26,8 +26,11 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::connection::JsonRpcConnection;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::connection::JsonRpcConnectionEvent;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::connection::JsonRpcTransport;
 
 pub(crate) const SESSION_ALREADY_ATTACHED_ERROR_CODE: i64 = -32010;
@@ -61,6 +64,7 @@ enum RpcCallTimeout {
     After(Duration),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub(crate) enum RpcClientEvent {
     Notification(JSONRPCNotification),
@@ -238,6 +242,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct RpcClient {
     write_tx: mpsc::Sender<JSONRPCMessage>,
     pending: Arc<Mutex<HashMap<RequestId, PendingRequest>>>,
@@ -254,6 +259,7 @@ pub(crate) struct RpcClient {
     reader_task: JoinHandle<()>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RpcClient {
     pub(crate) fn new(connection: JsonRpcConnection) -> (Self, mpsc::Receiver<RpcClientEvent>) {
         let JsonRpcConnection {
@@ -508,6 +514,7 @@ impl RpcClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for RpcClient {
     fn drop(&mut self) {
         self.transport.terminate();
@@ -620,6 +627,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_server_message(
     pending: &Mutex<HashMap<RequestId, PendingRequest>>,
     event_tx: &mpsc::Sender<RpcClientEvent>,

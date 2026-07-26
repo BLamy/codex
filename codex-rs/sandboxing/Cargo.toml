@@ -26,6 +26,8 @@ serde_json = { workspace = true }
 regex-lite = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 which = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

@@ -6,6 +6,7 @@ mod executable_name;
 pub(crate) mod parser;
 pub(crate) mod policy;
 pub mod rule;
+#[cfg(not(target_arch = "wasm32"))]
 mod sandbox_migration;
 
 pub use amend::AmendError;
@@ -29,4 +30,14 @@ pub use rule::PrefixRule;
 pub use rule::Rule;
 pub use rule::RuleMatch;
 pub use rule::RuleRef;
+#[cfg(not(target_arch = "wasm32"))]
 pub use sandbox_migration::prefix_rule_migration;
+
+#[cfg(target_arch = "wasm32")]
+pub async fn prefix_rule_migration(
+    _codex_home: &std::path::Path,
+    _policy_path: &std::path::Path,
+    _banned_prefixes: &[&[&str]],
+) -> std::io::Result<()> {
+    Ok(())
+}

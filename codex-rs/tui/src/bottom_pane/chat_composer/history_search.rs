@@ -903,8 +903,8 @@ mod tests {
 
     #[test]
     fn history_search_flushes_buffered_paste_before_snapshot() {
+        use crate::time::Instant;
         use std::time::Duration;
-        use std::time::Instant;
 
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);

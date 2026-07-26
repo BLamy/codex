@@ -14,6 +14,8 @@ use codex_protocol::capabilities::SelectedCapabilityRoot;
 use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
 use crate::catalog::SkillPackageId;
+#[cfg(target_arch = "wasm32")]
+use crate::catalog::SkillProviderError;
 use crate::catalog::SkillProviderResult;
 use crate::catalog::SkillReadResult;
 use crate::catalog::SkillResourceId;
@@ -54,6 +56,23 @@ pub struct SkillSearchRequest {
 
 pub type SkillProviderFuture<'a, T> =
     Pin<Box<dyn Future<Output = SkillProviderResult<T>> + Send + 'a>>;
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn bridge_local_provider_future<'a, T, F>(future: F) -> SkillProviderFuture<'a, T>
+where
+    T: Send + 'static,
+    F: Future<Output = SkillProviderResult<T>> + 'static,
+{
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = sender.send(future.await);
+    });
+    Box::pin(async move {
+        receiver.await.map_err(|_| {
+            SkillProviderError::new("browser skill provider task ended before producing a result")
+        })?
+    })
+}
 
 /// Source-specific skill catalog and resource access.
 ///

@@ -12,10 +12,16 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(super) fn absolutize(path: &Path) -> std::io::Result<PathBuf> {
-    if path.is_absolute() {
+    if is_absolute_for_platform(path) {
         return Ok(normalize_path(path));
     }
 
+    #[cfg(target_arch = "wasm32")]
+    {
+        return Ok(absolutize_from(path, Path::new("/")));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     Ok(absolutize_from(path, &std::env::current_dir()?))
 }
 
@@ -46,11 +52,21 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(not(windows))]
 fn path_with_base(path: &Path, base_path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    if is_absolute_for_platform(path) {
         path.to_path_buf()
     } else {
         base_path.join(path)
     }
+}
+
+fn is_absolute_for_platform(path: &Path) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return path.to_string_lossy().starts_with('/');
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    path.is_absolute()
 }
 
 #[cfg(windows)]

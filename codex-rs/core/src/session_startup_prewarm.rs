@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -18,6 +17,7 @@ use crate::session::INITIAL_SUBMIT_ID;
 use crate::session::session::Session;
 use crate::session::turn::build_prompt;
 use crate::session::turn::built_tools;
+use crate::time::Instant;
 use codex_otel::STARTUP_PREWARM_AGE_AT_FIRST_TURN_METRIC;
 use codex_otel::STARTUP_PREWARM_DURATION_METRIC;
 use codex_otel::SessionTelemetry;
@@ -184,11 +184,11 @@ impl SessionStartupPrewarmHandle {
 
 impl Session {
     pub(crate) async fn schedule_startup_prewarm(self: &Arc<Self>, base_instructions: String) {
-        if !self.services.model_client.responses_websocket_enabled() {
-            // Without websocket prewarm, resolve auth once so Agent Identity bootstrap can
-            // register or engage this session's bearer fallback before the first user request.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = base_instructions;
             let model_client = self.services.model_client.clone();
-            tokio::spawn(async move {
+            wasm_bindgen_futures::spawn_local(async move {
                 if let Err(err) = model_client.prewarm_auth().await {
                     warn!("startup auth prewarm failed: {err:#}");
                 }
@@ -196,40 +196,55 @@ impl Session {
             return;
         }
 
-        let session_telemetry = self.services.session_telemetry.clone();
-        let websocket_connect_timeout = self.provider().await.websocket_connect_timeout();
-        let started_at = Instant::now();
-        let startup_prewarm_session = Arc::clone(self);
-        let startup_prewarm = tokio::spawn(
-            async move {
-                let result =
-                    schedule_startup_prewarm_inner(startup_prewarm_session, base_instructions)
-                        .await;
-                let status = if result.is_ok() { "ready" } else { "failed" };
-                session_telemetry.record_startup_phase(
-                    "startup_prewarm_total",
-                    started_at.elapsed(),
-                    Some(status),
-                );
-                session_telemetry.record_duration(
-                    STARTUP_PREWARM_DURATION_METRIC,
-                    started_at.elapsed(),
-                    &[("status", status)],
-                );
-                result
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !self.services.model_client.responses_websocket_enabled() {
+                // Without websocket prewarm, resolve auth once so Agent Identity bootstrap can
+                // register or engage this session's bearer fallback before the first user request.
+                let model_client = self.services.model_client.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = model_client.prewarm_auth().await {
+                        warn!("startup auth prewarm failed: {err:#}");
+                    }
+                });
+                return;
             }
-            .instrument(trace_span!(
-                "startup_prewarm",
-                otel.name = "startup_prewarm",
-                thread.id = %self.thread_id(),
-            )),
-        );
-        self.set_session_startup_prewarm(SessionStartupPrewarmHandle::new(
-            startup_prewarm,
-            started_at,
-            websocket_connect_timeout,
-        ))
-        .await;
+
+            let session_telemetry = self.services.session_telemetry.clone();
+            let websocket_connect_timeout = self.provider().await.websocket_connect_timeout();
+            let started_at = Instant::now();
+            let startup_prewarm_session = Arc::clone(self);
+            let startup_prewarm = tokio::spawn(
+                async move {
+                    let result =
+                        schedule_startup_prewarm_inner(startup_prewarm_session, base_instructions)
+                            .await;
+                    let status = if result.is_ok() { "ready" } else { "failed" };
+                    session_telemetry.record_startup_phase(
+                        "startup_prewarm_total",
+                        started_at.elapsed(),
+                        Some(status),
+                    );
+                    session_telemetry.record_duration(
+                        STARTUP_PREWARM_DURATION_METRIC,
+                        started_at.elapsed(),
+                        &[("status", status)],
+                    );
+                    result
+                }
+                .instrument(trace_span!(
+                    "startup_prewarm",
+                    otel.name = "startup_prewarm",
+                    thread.id = %self.thread_id(),
+                )),
+            );
+            self.set_session_startup_prewarm(SessionStartupPrewarmHandle::new(
+                startup_prewarm,
+                started_at,
+                websocket_connect_timeout,
+            ))
+            .await;
+        }
     }
 
     pub(crate) async fn consume_startup_prewarm_for_regular_turn(
@@ -248,6 +263,7 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn schedule_startup_prewarm_inner(
     session: Arc<Session>,
     base_instructions: String,

@@ -1,8 +1,14 @@
 //! Serialized read-refresh-write transactions for MCP OAuth credentials.
 
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "wasm32")]
+use web_time::SystemTime;
+#[cfg(target_arch = "wasm32")]
+use web_time::UNIX_EPOCH;
 
 use anyhow::Context;
 use anyhow::Result;

@@ -10,6 +10,14 @@ use codex_app_server_protocol::PluginInstallPolicySource;
 use codex_app_server_protocol::PluginInterface;
 use codex_app_server_protocol::ScheduledTaskSummary;
 use codex_app_server_protocol::SkillInterface;
+#[cfg(target_arch = "wasm32")]
+use codex_http_client::HttpTransport;
+#[cfg(target_arch = "wasm32")]
+use codex_http_client::Request as CodexHttpRequest;
+#[cfg(target_arch = "wasm32")]
+use codex_http_client::ReqwestTransport;
+#[cfg(target_arch = "wasm32")]
+use codex_http_client::TransportError;
 use codex_login::CodexAuth;
 use codex_login::default_client::build_reqwest_client;
 use codex_plugin::AppConnectorId;
@@ -1947,6 +1955,7 @@ fn authenticated_request(
         .header(OAI_PRODUCT_SKU_HEADER, CODEX_PRODUCT_SKU))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn send_and_decode<T: for<'de> Deserialize<'de>>(
     request: RequestBuilder,
     url: &str,
@@ -1960,15 +1969,86 @@ async fn send_and_decode<T: for<'de> Deserialize<'de>>(
         })?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
+    decode_remote_plugin_response(status, &body, url)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn send_and_decode<T>(
+    request: RequestBuilder,
+    url: &str,
+) -> impl std::future::Future<Output = Result<T, RemotePluginCatalogError>> + Send
+where
+    T: for<'de> Deserialize<'de> + Send + 'static,
+{
+    let request_url = url.to_string();
+    let decode_url = request_url.clone();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = send_remote_plugin_request(request, request_url).await;
+        let _ = sender.send(result);
+    });
+
+    async move {
+        let (status, body) = receiver.await.map_err(|_| {
+            RemotePluginCatalogError::UnexpectedResponse(format!(
+                "browser remote plugin request task was cancelled for {decode_url}"
+            ))
+        })??;
+        decode_remote_plugin_response(status, &body, &decode_url)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn send_remote_plugin_request(
+    request: RequestBuilder,
+    url: String,
+) -> Result<(reqwest::StatusCode, String), RemotePluginCatalogError> {
+    let request = request
+        .build()
+        .map_err(|source| RemotePluginCatalogError::Request {
+            url: url.clone(),
+            source,
+        })?;
+    let mut host_request =
+        CodexHttpRequest::new(request.method().clone(), request.url().to_string());
+    host_request.headers = request.headers().clone();
+    host_request.timeout = request.timeout().copied();
+    if let Some(body) = request.body() {
+        let Some(bytes) = body.as_bytes() else {
+            return Err(RemotePluginCatalogError::UnexpectedResponse(format!(
+                "browser remote plugin request has a streaming body for {url}"
+            )));
+        };
+        host_request = host_request.with_raw_body(bytes.to_vec());
+    }
+
+    let transport = ReqwestTransport::new(build_reqwest_client());
+    match transport.execute(host_request).await {
+        Ok(response) => Ok((
+            response.status,
+            String::from_utf8_lossy(&response.body).into_owned(),
+        )),
+        Err(TransportError::Http { status, body, .. }) => Ok((status, body.unwrap_or_default())),
+        Err(error) => Err(RemotePluginCatalogError::UnexpectedResponse(format!(
+            "browser remote plugin request failed for {url}: {error}"
+        ))),
+    }
+}
+
+fn decode_remote_plugin_response<T: for<'de> Deserialize<'de>>(
+    status: reqwest::StatusCode,
+    body: &str,
+    url: &str,
+) -> Result<T, RemotePluginCatalogError> {
     if !status.is_success() {
         return Err(RemotePluginCatalogError::UnexpectedStatus {
             url: url.to_string(),
             status,
-            body,
+            body: body.to_string(),
         });
     }
 
-    serde_json::from_str(&body).map_err(|source| RemotePluginCatalogError::Decode {
+    serde_json::from_str(body).map_err(|source| RemotePluginCatalogError::Decode {
         url: url.to_string(),
         source,
     })

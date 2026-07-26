@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
+use crate::time::Instant;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
@@ -77,7 +78,7 @@ impl CodeModeWaitHandler {
             {
                 let args: ExecWaitArgs = parse_arguments(&arguments)?;
                 let exec = ExecContext { session, turn };
-                let started_at = std::time::Instant::now();
+                let started_at = Instant::now();
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
                 let wait_response = if args.terminate {
                     exec.session

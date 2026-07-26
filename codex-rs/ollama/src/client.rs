@@ -1,5 +1,8 @@
 use futures::StreamExt;
-use futures::stream::BoxStream;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream::BoxStream as PullEventStream;
+#[cfg(target_arch = "wasm32")]
+use futures::stream::LocalBoxStream as PullEventStream;
 use semver::Version;
 use serde_json::Value as JsonValue;
 use std::collections::VecDeque;
@@ -64,8 +67,12 @@ impl OllamaClient {
             .expect("oss provider must have a base_url");
         let uses_openai_compat = is_openai_compatible_base_url(base_url);
         let host_root = base_url_to_host_root(base_url);
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
+        let mut client_builder = reqwest::Client::builder();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            client_builder = client_builder.connect_timeout(std::time::Duration::from_secs(5));
+        }
+        let client = client_builder
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         let client = Self {
@@ -157,7 +164,7 @@ impl OllamaClient {
     pub async fn pull_model_stream(
         &self,
         model: &str,
-    ) -> io::Result<BoxStream<'static, PullEvent>> {
+    ) -> io::Result<PullEventStream<'static, PullEvent>> {
         let url = format!("{}/api/pull", self.host_root.trim_end_matches('/'));
         let resp = self
             .client

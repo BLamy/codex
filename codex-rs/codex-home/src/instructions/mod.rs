@@ -1,10 +1,14 @@
 use std::io;
 
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LOCAL_FS;
 use codex_extension_api::LoadUserInstructionsFuture;
 use codex_extension_api::LoadedUserInstructions;
 use codex_extension_api::UserInstructions;
 use codex_extension_api::UserInstructionsProvider;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_path_uri::PathUri;
 
 const DEFAULT_AGENTS_MD_FILENAME: &str = "AGENTS.md";
 const LOCAL_AGENTS_MD_FILENAME: &str = "AGENTS.override.md";
@@ -25,7 +29,10 @@ impl CodexHomeUserInstructionsProvider {
         let mut warnings = Vec::new();
         for candidate in [LOCAL_AGENTS_MD_FILENAME, DEFAULT_AGENTS_MD_FILENAME] {
             let path = self.codex_home.join(candidate);
-            match tokio::fs::metadata(path.as_path()).await {
+            #[cfg(not(target_arch = "wasm32"))]
+            let metadata = tokio::fs::metadata(path.as_path()).await;
+            #[cfg(not(target_arch = "wasm32"))]
+            match metadata {
                 Ok(metadata) if !metadata.is_file() => continue,
                 Ok(_) => {}
                 Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
@@ -37,7 +44,13 @@ impl CodexHomeUserInstructionsProvider {
                     continue;
                 }
             }
-            let data = match tokio::fs::read(path.as_path()).await {
+            #[cfg(not(target_arch = "wasm32"))]
+            let data = tokio::fs::read(path.as_path()).await;
+            #[cfg(target_arch = "wasm32")]
+            let data = LOCAL_FS
+                .read_file(&PathUri::from_abs_path(&path), /*sandbox*/ None)
+                .await;
+            let data = match data {
                 Ok(data) => data,
                 Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
                 Err(err) => {

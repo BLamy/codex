@@ -1,5 +1,9 @@
 use ratatui::layout::Rect;
 
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+#[path = "highlight_wasm.rs"]
+pub(crate) mod highlight;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
 pub(crate) mod highlight;
 pub(crate) mod line_utils;
 pub(crate) mod renderable;

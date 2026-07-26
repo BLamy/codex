@@ -68,7 +68,7 @@ pub fn spawn_response_stream(
         let _ = turn_state.set(header_value.to_string());
     }
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
-    tokio::spawn(async move {
+    let pump = async move {
         if let Some(model) = server_model {
             let _ = tx_event.send(Ok(ResponseEvent::ServerModel(model))).await;
         }
@@ -91,7 +91,13 @@ pub fn spawn_response_stream(
             safety_buffering_treatment,
         )
         .await;
-    });
+    };
+    // The wasm reqwest byte stream is not `Send`, so it cannot cross tokio's
+    // multi-thread spawn bound; use the single-threaded browser executor there.
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::spawn(pump);
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(pump);
 
     ResponseStream {
         rx_event,

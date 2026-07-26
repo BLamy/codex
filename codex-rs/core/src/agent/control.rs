@@ -58,6 +58,16 @@ mod legacy;
 mod residency;
 mod spawn;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_agent_control_task(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_agent_control_task(future: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SpawnAgentForkMode {
     FullHistory,
@@ -446,7 +456,7 @@ impl AgentControl {
             return;
         };
         let control = self.clone();
-        tokio::spawn(async move {
+        spawn_agent_control_task(async move {
             let status = match control.subscribe_status(child_thread_id).await {
                 Ok(mut status_rx) => {
                     let mut status = status_rx.borrow().clone();

@@ -16,7 +16,10 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::codex_apps::normalize_codex_apps_callable_name;
 use crate::codex_apps::normalize_codex_apps_callable_namespace;
@@ -147,6 +150,8 @@ impl ManagedClient {
 pub(crate) type ManagedClientFuture =
     Shared<BoxFuture<'static, Result<ManagedClient, StartupOutcomeError>>>;
 
+type ManagedClientFactory = dyn Fn() -> ManagedClientFuture + Send + Sync;
+
 #[derive(Default)]
 struct CodexAppsStartupReconnectState {
     current_client: Option<ManagedClient>,
@@ -163,13 +168,13 @@ struct CodexAppsStartupStatusContext {
 }
 
 pub(crate) struct CodexAppsStartupReconnect {
-    factory: Arc<dyn Fn() -> ManagedClientFuture + Send + Sync>,
+    factory: Arc<ManagedClientFactory>,
     state: StdMutex<CodexAppsStartupReconnectState>,
     startup_status_context: Option<CodexAppsStartupStatusContext>,
 }
 
 impl CodexAppsStartupReconnect {
-    pub(crate) fn new(factory: Arc<dyn Fn() -> ManagedClientFuture + Send + Sync>) -> Self {
+    pub(crate) fn new(factory: Arc<ManagedClientFactory>) -> Self {
         Self {
             factory,
             state: StdMutex::new(CodexAppsStartupReconnectState::default()),
@@ -218,7 +223,7 @@ impl CodexAppsStartupReconnect {
         }
 
         let reconnect = Arc::clone(self);
-        tokio::spawn(async move {
+        let reconnect_task = async move {
             let result = (reconnect.factory)().await;
             let startup_status_context = reconnect.startup_status_context.clone();
             let recovered = {
@@ -260,7 +265,11 @@ impl CodexAppsStartupReconnect {
                     })
                     .await;
             }
-        });
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(reconnect_task);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(reconnect_task);
     }
 }
 
@@ -322,7 +331,7 @@ impl ManagedClientStartup {
         let tool_catalog_fetch_ticket = tool_catalog_cache_context
             .as_ref()
             .map(McpToolCatalogCacheContext::begin_fetch);
-        async move {
+        let startup_future = async move {
             let refresh_start = is_codex_apps_mcp_server.then(Instant::now);
             let outcome = match async {
                 if let Err(error) = validate_mcp_server_name(&server_name) {
@@ -391,9 +400,8 @@ impl ManagedClientStartup {
             startup_complete.store(true, Ordering::Release);
             outcome
         }
-        .in_current_span()
-        .boxed()
-        .shared()
+        .in_current_span();
+        startup_future.boxed().shared()
     }
 }
 
@@ -486,7 +494,12 @@ impl AsyncManagedClient {
                 .is_some_and(McpToolCatalogCacheContext::has_tools)
         {
             let startup_task = client.clone();
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::spawn(async move {
+                let _ = startup_task.await;
+            });
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(async move {
                 let _ = startup_task.await;
             });
         }

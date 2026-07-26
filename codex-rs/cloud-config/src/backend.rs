@@ -55,6 +55,7 @@ impl BackendBundleClient {
 }
 
 impl BundleClient for BackendBundleClient {
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get_bundle(&self, auth: &CodexAuth) -> Result<CloudConfigBundle, BundleRequestError> {
         let client = BackendClient::from_auth(self.base_url.clone(), auth)
             .inspect_err(|err| {
@@ -84,6 +85,13 @@ impl BundleClient for BackendBundleClient {
             })?;
 
         Ok(bundle_from_response(response))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn get_bundle(&self, _auth: &CodexAuth) -> Result<CloudConfigBundle, BundleRequestError> {
+        Err(BundleRequestError::Retryable(
+            RetryableFailureKind::BackendClientInit,
+        ))
     }
 }
 

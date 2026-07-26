@@ -8,6 +8,8 @@ use arc_swap::ArcSwap;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
 use codex_config::ConfigLayerStackOrdering;
+#[cfg(target_arch = "wasm32")]
+use codex_exec_server::LOCAL_FS;
 use codex_execpolicy::AmendError;
 use codex_execpolicy::Decision;
 use codex_execpolicy::Error as ExecPolicyRuleError;
@@ -28,6 +30,7 @@ use codex_shell_command::is_dangerous_command::DangerousCommandMatch;
 use codex_shell_command::is_dangerous_command::dangerous_command_match;
 use codex_shell_command::is_safe_command::is_known_safe_command;
 use thiserror::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task::spawn_blocking;
@@ -39,6 +42,8 @@ use crate::tools::sandboxing::ExecApprovalRequirement;
 use codex_shell_command::bash::parse_shell_lc_plain_commands;
 use codex_shell_command::bash::parse_shell_lc_single_command_prefix;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(target_arch = "wasm32")]
+use codex_utils_path_uri::PathUri;
 use shlex::try_join as shlex_try_join;
 
 const PROMPT_CONFLICT_REASON: &str =
@@ -664,13 +669,7 @@ pub async fn load_exec_policy(config_stack: &ConfigLayerStack) -> Result<Policy,
 
     let mut parser = PolicyParser::new();
     for policy_path in &policy_paths {
-        let contents =
-            fs::read_to_string(policy_path)
-                .await
-                .map_err(|source| ExecPolicyError::ReadFile {
-                    path: policy_path.clone(),
-                    source,
-                })?;
+        let contents = read_policy_file(policy_path).await?;
         let identifier = policy_path.to_string_lossy().to_string();
         parser
             .parse(&identifier, &contents)
@@ -1031,6 +1030,39 @@ fn render_shlex_command(args: &[String]) -> String {
     shlex_try_join(args.iter().map(String::as_str)).unwrap_or_else(|_| args.join(" "))
 }
 
+async fn read_policy_file(policy_path: &PathBuf) -> Result<String, ExecPolicyError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let absolute_path =
+            AbsolutePathBuf::from_absolute_path_checked(policy_path).map_err(|source| {
+                ExecPolicyError::ReadFile {
+                    path: policy_path.clone(),
+                    source,
+                }
+            })?;
+        LOCAL_FS
+            .read_file_text(
+                &PathUri::from_abs_path(&absolute_path),
+                /*sandbox*/ None,
+            )
+            .await
+            .map_err(|source| ExecPolicyError::ReadFile {
+                path: policy_path.clone(),
+                source,
+            })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        fs::read_to_string(policy_path)
+            .await
+            .map_err(|source| ExecPolicyError::ReadFile {
+                path: policy_path.clone(),
+                source,
+            })
+    }
+}
+
 /// Derive a string explaining why the command was forbidden. If `justification`
 /// is set by the user, this can contain instructions with recommended
 /// alternatives, for example.
@@ -1099,54 +1131,105 @@ fn dangerous_command_rejection_reason(
 
 async fn collect_policy_files(dir: impl AsRef<Path>) -> Result<Vec<PathBuf>, ExecPolicyError> {
     let dir = dir.as_ref();
-    let mut read_dir = match fs::read_dir(dir).await {
-        Ok(read_dir) => read_dir,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(ExecPolicyError::ReadDir {
-                dir: dir.to_path_buf(),
-                source,
-            });
-        }
-    };
-
-    let mut policy_paths = Vec::new();
-    while let Some(entry) =
-        read_dir
-            .next_entry()
-            .await
-            .map_err(|source| ExecPolicyError::ReadDir {
-                dir: dir.to_path_buf(),
-                source,
-            })?
+    #[cfg(target_arch = "wasm32")]
     {
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .await
-            .map_err(|source| ExecPolicyError::ReadDir {
+        let absolute_dir = AbsolutePathBuf::from_absolute_path_checked(dir).map_err(|source| {
+            ExecPolicyError::ReadDir {
                 dir: dir.to_path_buf(),
                 source,
-            })?;
-
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext == RULE_EXTENSION)
-            && file_type.is_file()
+            }
+        })?;
+        let read_dir = match LOCAL_FS
+            .read_directory(
+                &PathUri::from_abs_path(&absolute_dir),
+                /*sandbox*/ None,
+            )
+            .await
         {
-            policy_paths.push(path);
+            Ok(read_dir) => read_dir,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(ExecPolicyError::ReadDir {
+                    dir: dir.to_path_buf(),
+                    source,
+                });
+            }
+        };
+
+        let mut policy_paths = Vec::new();
+        for entry in read_dir {
+            let path = dir.join(&entry.file_name);
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == RULE_EXTENSION)
+                && entry.is_file
+            {
+                policy_paths.push(path);
+            }
         }
+
+        policy_paths.sort();
+
+        tracing::debug!(
+            "loaded {} .rules files in {}",
+            policy_paths.len(),
+            dir.display()
+        );
+        return Ok(policy_paths);
     }
 
-    policy_paths.sort();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut read_dir = match fs::read_dir(dir).await {
+            Ok(read_dir) => read_dir,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(ExecPolicyError::ReadDir {
+                    dir: dir.to_path_buf(),
+                    source,
+                });
+            }
+        };
 
-    tracing::debug!(
-        "loaded {} .rules files in {}",
-        policy_paths.len(),
-        dir.display()
-    );
-    Ok(policy_paths)
+        let mut policy_paths = Vec::new();
+        while let Some(entry) =
+            read_dir
+                .next_entry()
+                .await
+                .map_err(|source| ExecPolicyError::ReadDir {
+                    dir: dir.to_path_buf(),
+                    source,
+                })?
+        {
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .await
+                .map_err(|source| ExecPolicyError::ReadDir {
+                    dir: dir.to_path_buf(),
+                    source,
+                })?;
+
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == RULE_EXTENSION)
+                && file_type.is_file()
+            {
+                policy_paths.push(path);
+            }
+        }
+
+        policy_paths.sort();
+
+        tracing::debug!(
+            "loaded {} .rules files in {}",
+            policy_paths.len(),
+            dir.display()
+        );
+        Ok(policy_paths)
+    }
 }
 
 #[cfg(test)]

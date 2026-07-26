@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
-use std::time::Instant;
+use crate::time::Instant;
 
 use super::ChatWidget;
 use super::plugins::ADD_MARKETPLACE_TAB_ID;

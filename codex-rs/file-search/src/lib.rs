@@ -25,6 +25,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 
 #[cfg(test)]
@@ -654,8 +655,11 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::thread;
     use std::time::Duration;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::time::Instant;
     use tempfile::TempDir;
+    #[cfg(target_arch = "wasm32")]
+    use web_time::Instant;
 
     #[test]
     fn verify_score_is_none_for_non_match() {

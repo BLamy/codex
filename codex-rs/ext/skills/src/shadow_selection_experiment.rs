@@ -4,10 +4,10 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Duration;
-use std::time::Instant;
 
 use codex_otel::MetricsClient;
 use codex_protocol::user_input::UserInput;
+use web_time::Instant;
 
 use crate::catalog::SkillCatalog;
 use crate::catalog::SkillSourceKind;

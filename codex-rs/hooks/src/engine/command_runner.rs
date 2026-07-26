@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;

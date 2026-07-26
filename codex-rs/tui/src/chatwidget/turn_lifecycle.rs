@@ -1,7 +1,10 @@
 //! Agent-turn lifecycle state for `ChatWidget`.
 
 use std::collections::HashSet;
-use std::time::Instant;
+#[cfg(not(all(target_arch = "wasm32", feature = "real-tui-wasm")))]
+use crate::time::Instant;
+#[cfg(all(target_arch = "wasm32", feature = "real-tui-wasm"))]
+use web_time::Instant;
 
 use codex_utils_sleep_inhibitor::SleepInhibitor;
 

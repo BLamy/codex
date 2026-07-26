@@ -3,8 +3,13 @@ use std::io;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
+use codex_utils_image::ImageProcessingError;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::PromptImageMode;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::data_url_from_bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use codex_utils_image::load_for_prompt_bytes;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -22,7 +27,6 @@ use crate::permissions::NetworkSandboxPolicy;
 use crate::protocol::SandboxPolicy;
 use crate::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use codex_utils_image::ImageProcessingError;
 use schemars::JsonSchema;
 
 use crate::ResponseItemId;
@@ -1467,39 +1471,64 @@ pub fn local_image_content_items_with_label_number(
     label_number: Option<usize>,
     detail: ImageDetail,
 ) -> Vec<ContentItem> {
-    let mode = match detail {
-        ImageDetail::Original => PromptImageMode::Original,
-        ImageDetail::Auto | ImageDetail::Low | ImageDetail::High => PromptImageMode::ResizeToFit,
-    };
-
-    match load_for_prompt_bytes(path, file_bytes, mode) {
-        Ok(image) => local_image_content_items(path, image.into_data_url(), label_number, detail),
-        Err(err) => match &err {
-            ImageProcessingError::Read { .. }
-            | ImageProcessingError::Encode { .. }
-            | ImageProcessingError::InvalidDataUrl { .. }
-            | ImageProcessingError::ImageTooLarge { .. } => {
-                vec![local_media_error_placeholder(
-                    path,
-                    &err,
-                    LocalMediaKind::Image,
-                )]
-            }
-            ImageProcessingError::Decode { .. } if err.is_invalid_image() => {
-                vec![invalid_image_error_placeholder(path, &err)]
-            }
-            ImageProcessingError::Decode { .. } => {
-                vec![local_media_error_placeholder(
-                    path,
-                    &err,
-                    LocalMediaKind::Image,
-                )]
-            }
-            ImageProcessingError::UnsupportedImageFormat { mime } => {
-                vec![unsupported_image_error_placeholder(path, mime)]
-            }
-        },
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (file_bytes, label_number, detail);
+        return vec![local_media_error_placeholder(
+            path,
+            "local image decoding is unavailable in the browser wasm runtime",
+            LocalMediaKind::Image,
+        )];
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mode = match detail {
+            ImageDetail::Original => PromptImageMode::Original,
+            ImageDetail::Auto | ImageDetail::Low | ImageDetail::High => {
+                PromptImageMode::ResizeToFit
+            }
+        };
+
+        match load_for_prompt_bytes(path, file_bytes, mode) {
+            Ok(image) => {
+                local_image_content_items(path, image.into_data_url(), label_number, detail)
+            }
+            Err(err) => match &err {
+                ImageProcessingError::Read { .. }
+                | ImageProcessingError::Encode { .. }
+                | ImageProcessingError::InvalidDataUrl { .. }
+                | ImageProcessingError::ImageTooLarge { .. } => {
+                    vec![local_media_error_placeholder(
+                        path,
+                        &err,
+                        LocalMediaKind::Image,
+                    )]
+                }
+                ImageProcessingError::Decode { .. } if err.is_invalid_image() => {
+                    vec![invalid_image_error_placeholder(path, &err)]
+                }
+                ImageProcessingError::Decode { .. } => {
+                    vec![local_media_error_placeholder(
+                        path,
+                        &err,
+                        LocalMediaKind::Image,
+                    )]
+                }
+                ImageProcessingError::UnsupportedImageFormat { mime } => {
+                    vec![unsupported_image_error_placeholder(path, mime)]
+                }
+            },
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn data_url_from_bytes(mime: &str, file_bytes: &[u8]) -> String {
+    use base64::Engine as _;
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(file_bytes);
+    format!("data:{mime};base64,{encoded}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
